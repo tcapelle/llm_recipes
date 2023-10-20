@@ -1,5 +1,5 @@
 from functools import partial
-from fastprogress import progress_bar
+from tqdm.auto import tqdm
 
 import wandb
 import pandas as pd
@@ -7,7 +7,8 @@ import pandas as pd
 from datasets import load_from_disk
 
 import evaluate
-from transformers import GenerationConfig
+import torch
+from transformers import GenerationConfig, AutoTokenizer
 from transformers.integrations import WandbCallback
 
 def load_ds_from_artifact(at_address, at_type="dataset"):
@@ -45,11 +46,13 @@ def _generate(prompt, model, tokenizer, gen_config):
 
 
 class LLMSampleCB(WandbCallback):
-    def __init__(self, trainer, tokenizer, test_dataset, num_samples=10, max_new_tokens=256):
+    def __init__(self, trainer, test_dataset, num_samples=10, max_new_tokens=256):
         super().__init__()
         self.sample_dataset = test_dataset.select(range(num_samples))
         self.gen_config = GenerationConfig.from_pretrained(trainer.model.name_or_path,
                                                            max_new_tokens=max_new_tokens)
+        tokenizer = AutoTokenizer.from_pretrained(trainer.model.name_or_path)
+        tokenizer.pad_token = tokenizer.eos_token
         self.generate = partial(_generate, 
                                 model=trainer.model, 
                                 tokenizer=tokenizer, 
@@ -57,7 +60,7 @@ class LLMSampleCB(WandbCallback):
 
     def log_generations_table(self, examples):
         records_table = wandb.Table(columns=["prompt", "generation"] + list(self.gen_config.to_dict().keys()))
-        for example in progress_bar(examples, leave=False):
+        for example in tqdm(examples, leave=False):
             prompt = example["text"]
             generation = self.generate(prompt=prompt[-1000:])
             records_table.add_data(prompt, generation, *list(self.gen_config.to_dict().values()))
@@ -85,7 +88,7 @@ def create_packed_datasets(dataset, tokenizer, max_seq_length=1024, formatting_f
         tokenizer,
         train_data,
         formatting_func=formatting_func,
-        infinite=True,
+        infinite=False,
         seq_length=max_seq_length,
         chars_per_token=chars_per_token,
     )
@@ -104,7 +107,7 @@ def chars_token_ratio(dataset, tokenizer, formatting_func, nb_examples=400):
     Estimate the average number of characters per token in the dataset.
     """
     total_characters, total_tokens = 0, 0
-    for _, example in progress_bar(zip(range(nb_examples), iter(dataset)), total=nb_examples):
+    for _, example in tqdm(zip(range(nb_examples), iter(dataset)), total=nb_examples):
         text = formatting_func(example)
         total_characters += len(text)
         if tokenizer.is_fast:
