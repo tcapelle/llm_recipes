@@ -13,7 +13,7 @@ from transformers import default_data_collator, GenerationConfig
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from transformers import get_cosine_schedule_with_warmup
 
-from utils import save_model, Accuracy, to_gpu, flat_cross_entropy
+from utils import load_jsonl, save_model, Accuracy, to_gpu, flat_cross_entropy
 
 
 WANDB_PROJECT = "alpaca_ft"
@@ -39,13 +39,6 @@ config = SimpleNamespace(
     freeze_embed = True,  # why train this? let's keep them frozen ❄️
     max_new_tokens=256, # for generations
 )
-
-def load_jsonl(file_path):
-    data = []
-    with open(file_path, 'r') as file:
-        for line in file:
-            data.append(json.loads(line))
-    return data
 
 def _prompt_no_input(row):
     return ("Below is an instruction that describes a task. "
@@ -159,7 +152,7 @@ def wmask(dataset, tokenizer, max_seq_len=config.max_seq_len):
         else:
             input_ids = pad_to_len(current_pack_inputs, max_seq_len, pad_token)
             label_ids = pad_to_len(current_pack_outputs, max_seq_len, pad_token)
-            packed_ds.append({"input_ids": input_ids[:-1], "labels": input_ids[1:]})
+            packed_ds.append({"input_ids": input_ids[:-1], "labels": label_ids[1:]})
             
             # create next example
             current_pack_inputs = example
@@ -190,7 +183,7 @@ eval_dataloader = DataLoader(
     collate_fn=default_data_collator,
     shuffle=False,
 )
-# Update with the size of the dataloader now that we know
+# Update with the size of the dataloader now that we know it
 config.total_train_steps = config.epochs * len(train_dataloader) // config.gradient_accumulation_steps
 config.eval_every = config.total_train_steps//10. # we evaluate every 1/10th of the total train steps.
 
@@ -204,26 +197,12 @@ def prepare_model(config):
         use_cache=False,
     )
     param_count(model)
-    # random_freeze(model, config.freeze_pct, config.freeze_embed)
     freeze(model, config.n_freeze, config.freeze_embed)
     if config.gradient_checkpointing:
         model.gradient_checkpointing_enable()
     print("\nFinal param count:")
     param_count(model)
     return model
-
-
-def random_freeze(model, freeze_pct=0.8, freeze_embed=True):
-    # freeze layers (disable gradients)
-    for param in model.parameters(): param.requires_grad = False
-    for param in model.lm_head.parameters(): param.requires_grad = True
-    for param in model.model.layers.parameters(): 
-        if random.random() > freeze_pct:
-            param.requires_grad = True
-
-    # Just freeze embeddings for small memory decrease
-    if freeze_embed:
-        model.model.embed_tokens.weight.requires_grad_(False);
 
 def freeze(model, n_freeze, freeze_embed):
     # freeze layers (disable gradients)
@@ -251,7 +230,6 @@ scheduler = get_cosine_schedule_with_warmup(
     num_training_steps=config.total_train_steps,
     num_warmup_steps=config.total_train_steps // 10,
 )
-
 
 
 def generate(prompt, tokenizer):
