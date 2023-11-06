@@ -6,19 +6,32 @@ from types import SimpleNamespace
 from tqdm.auto import tqdm
 from pathlib import Path
 
-
 import torch
 from torch.utils.data import DataLoader
 from transformers import default_data_collator, GenerationConfig
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from transformers import get_cosine_schedule_with_warmup
 
-from utils import load_jsonl, save_model, Accuracy, to_gpu, flat_cross_entropy
-
+from llm_recipes.utils import (
+    load_jsonl, 
+    save_model, 
+    Accuracy, 
+    to_gpu, 
+    flat_cross_entropy, 
+    parse_args, 
+    freeze
+)
+from llm_recipes.data import (
+    standard_packing, 
+    pad_packing, 
+    masking_and_packing, 
+    pad_mask_packing
+)
 
 WANDB_PROJECT = "alpaca_ft"
+ENTITY = None
 DATASET_AT = 'capecape/alpaca_ft/alpaca_gpt4_splitted:v4'
-TAGS = ["wayde_and_mask", "7b"]
+TAGS = ["truncation_pad", "7b"]
 
 
 config = SimpleNamespace(
@@ -38,7 +51,10 @@ config = SimpleNamespace(
     gradient_checkpointing = True,  # saves even more memory
     freeze_embed = True,  # why train this? let's keep them frozen ❄️
     max_new_tokens=256, # for generations
+    pad=False,  # pad sequences to `max_sequence_len`
+    mask_prompt=False, # mask input prompt
 )
+parse_args(config)
 
 def _prompt_no_input(row):
     return ("Below is an instruction that describes a task. "
@@ -64,109 +80,34 @@ def get_dataset(dataset_at = DATASET_AT):
     def _format_dataset(dataset):
         "No EOS token yet"
         return [{"prompt":create_alpaca_prompt(row), 
-                 "output": row["output"], 
-                 "example": create_alpaca_prompt(row) + row["output"]} for row in dataset]
+                 "output": row["output"]} for row in dataset]
         
     train_dataset = _format_dataset(train_dataset)
     eval_dataset = _format_dataset(eval_dataset)
     print(train_dataset[0])
     return train_dataset, eval_dataset
 
-def pack(dataset, tokenizer, max_seq_len=config.max_seq_len):
-    max_seq_len = max_seq_len + 1  # to account for dropping one item
-    tkds_ids = tokenizer([s["example"] for s in dataset])["input_ids"]
-    
-    all_token_ids = []
-    for tokenized_input in tkds_ids:
-        all_token_ids.extend(tokenized_input + [tokenizer.eos_token_id])
-    
-    print(f"Total number of tokens: {len(all_token_ids)}")
-    packed_ds = []
-    for i in range(0, len(all_token_ids), max_seq_len):
-        input_ids = all_token_ids[i : i + max_seq_len]
-        if len(input_ids) == max_seq_len:  # drop last
-            packed_ds.append({"input_ids": input_ids[:-1], "labels": input_ids[1:]})
-    return packed_ds
+def packing_func(pad=False, mask_prompt=False):
+    "Packing method to use!"
+    if pad and mask_prompt:
+        return pad_mask_packing
+    elif pad and not mask_prompt:
+        return pad_packing
+    elif not pad and mask_prompt:
+        return masking_and_packing
+    else:
+        return standard_packing
 
-
-def pad_to_len(seq, max_seq_len, pad_token_id):
-    if len(seq) < max_seq_len:
-        seq = seq + [pad_token_id] * (max_seq_len - len(seq))
-    return seq
-
-def wpack(dataset, tokenizer, max_seq_len=config.max_seq_len):
-    max_seq_len = max_seq_len + 1  # to account for dropping one item
-    pad_token=tokenizer.pad_token_id
-    tkds_ids = tokenizer([s["example"] for s in dataset])["input_ids"]
-
-    packed_ds = [] 
-    current_pack = []
-    for tokenized_input in tkds_ids:
-        if len(current_pack) < max_seq_len - len(tokenized_input):
-            current_pack.extend(tokenized_input + [tokenizer.eos_token_id])
-        else:
-            input_ids = pad_to_len(current_pack, max_seq_len, pad_token)
-            packed_ds.append({"input_ids": input_ids[:-1], "labels": input_ids[1:]})
-
-            #we start next pack
-            current_pack = tokenized_input + [tokenizer.eos_token_id]
-    return packed_ds
-
-def mask_pack(dataset, tokenizer, max_seq_len=config.max_seq_len):
-    pad_token=tokenizer.pad_token_id
-    prompt_ids = tokenizer([s["prompt"] for s in dataset])["input_ids"]
-    outputs_ids = tokenizer([s["output"] for s in dataset])["input_ids"]
-
-    all_token_ids = []
-    all_labels_ids = []
-    for prompt, output in zip(prompt_ids, outputs_ids):
-        all_token_ids.extend(prompt + output + [tokenizer.eos_token_id])
-        all_labels_ids.extend([-100]*len(prompt) + output + [tokenizer.eos_token_id])
-
-    assert len(all_token_ids) == len(all_labels_ids), "Error on tokenizing"
-    
-    print(f"Total number of tokens: {len(all_token_ids)}")
-    packed_ds = []
-    for i in range(0, len(all_token_ids), max_seq_len):
-        input_ids = all_token_ids[i : i + max_seq_len]
-        label_ids = all_labels_ids[i : i + max_seq_len]
-        if len(input_ids) == max_seq_len:  # drop last
-            packed_ds.append({"input_ids": input_ids[:-1], 
-                              "labels": label_ids[1:]})
-    return packed_ds
-
-def wmask(dataset, tokenizer, max_seq_len=config.max_seq_len):
-    pad_token=tokenizer.pad_token_id
-    prompt_ids = tokenizer([s["prompt"] for s in dataset])["input_ids"]
-    outputs_ids = tokenizer([s["output"] for s in dataset])["input_ids"]
-
-    packed_ds = [] 
-    current_pack_inputs = []
-    current_pack_outputs = []
-    for prompt, output in zip(prompt_ids, outputs_ids):
-        example = prompt + output + [tokenizer.eos_token_id]
-        label = [-100]*len(prompt) + output + [tokenizer.eos_token_id]
-        if len(current_pack_inputs) < max_seq_len - len(example):
-            current_pack_inputs.extend(example)
-            current_pack_outputs.extend(label)
-        else:
-            input_ids = pad_to_len(current_pack_inputs, max_seq_len, pad_token)
-            label_ids = pad_to_len(current_pack_outputs, max_seq_len, pad_token)
-            packed_ds.append({"input_ids": input_ids[:-1], "labels": label_ids[1:]})
-            
-            # create next example
-            current_pack_inputs = example
-            current_pack_outputs = label
-    return packed_ds
-
-run = wandb.init(project=WANDB_PROJECT, job_type="train", tags=TAGS, config=config)
+run = wandb.init(project=WANDB_PROJECT, entity=ENTITY, job_type="train", tags=TAGS, config=config)
 train_dataset, eval_dataset = get_dataset()
 
 tokenizer = AutoTokenizer.from_pretrained(config.model_id)
 tokenizer.pad_token = tokenizer.eos_token
 
-train_ds_packed = wmask(train_dataset, tokenizer, config.max_seq_len)
-eval_ds_packed = wmask(eval_dataset, tokenizer, config.max_seq_len)
+pack = packing_func(config.pad, config.mask_prompt)
+
+train_ds_packed = pack(train_dataset, tokenizer, config.max_seq_len)
+eval_ds_packed = pack(eval_dataset, tokenizer, config.max_seq_len)
 print(f"Final number of train samples: {len(train_ds_packed)}")
 
 torch.manual_seed(config.seed)# I have an A100 GPU with 40GB of RAM 😎
@@ -204,15 +145,7 @@ def prepare_model(config):
     param_count(model)
     return model
 
-def freeze(model, n_freeze, freeze_embed):
-    # freeze layers (disable gradients)
-    for param in model.parameters(): param.requires_grad = False
-    for param in model.lm_head.parameters(): param.requires_grad = True
-    for param in model.model.layers[n_freeze:].parameters(): param.requires_grad = True
 
-    # Just freeze embeddings for small memory decrease
-    if freeze_embed:
-        model.model.embed_tokens.weight.requires_grad_(False);
         
 def param_count(m):
     params = sum([p.numel() for p in m.parameters()])/1_000_000
