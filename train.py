@@ -25,13 +25,14 @@ from llm_recipes.data import (
     standard_packing, 
     pad_packing, 
     masking_and_packing, 
-    pad_mask_packing
+    pad_mask_packing,
+    collate_and_pad
 )
 
 WANDB_PROJECT = "alpaca_ft"
-ENTITY = None
+ENTITY = "reviewco"
 DATASET_AT = 'capecape/alpaca_ft/alpaca_gpt4_splitted:v4'
-TAGS = ["truncation_pad", "7b"]
+TAGS = ["7b"]
 
 
 config = SimpleNamespace(
@@ -53,6 +54,10 @@ config = SimpleNamespace(
     max_new_tokens=256, # for generations
     pad=False,  # pad sequences to `max_sequence_len`
     mask_prompt=False, # mask input prompt
+    packing=True, # pack for efficient training
+    wandb_project=WANDB_PROJECT,
+    entity=ENTITY,
+    tags=TAGS,
 )
 parse_args(config)
 
@@ -98,30 +103,38 @@ def packing_func(pad=False, mask_prompt=False):
     else:
         return standard_packing
 
-run = wandb.init(project=WANDB_PROJECT, entity=ENTITY, job_type="train", tags=TAGS, config=config)
+run = wandb.init(project=config.wandb_project, 
+                 entity=config.entity, 
+                 job_type="train", 
+                 tags=config.tags, 
+                 config=config)
 train_dataset, eval_dataset = get_dataset()
 
 tokenizer = AutoTokenizer.from_pretrained(config.model_id)
 tokenizer.pad_token = tokenizer.eos_token
 
-pack = packing_func(config.pad, config.mask_prompt)
-
-train_ds_packed = pack(train_dataset, tokenizer, config.max_seq_len)
-eval_ds_packed = pack(eval_dataset, tokenizer, config.max_seq_len)
-print(f"Final number of train samples: {len(train_ds_packed)}")
+if config.packing:
+    pack = packing_func(config.pad, config.mask_prompt)
+    train_dataset = pack(train_dataset, tokenizer, config.max_seq_len)
+    eval_dataset = pack(eval_dataset, tokenizer, config.max_seq_len)
+    collate_fn = default_data_collator
+else:
+    collate_fn = collate_and_pad(tokenizer)
+    print("No packing, we are going to train for long!")
+print(f"Final number of train samples: {len(train_dataset)}")
 
 torch.manual_seed(config.seed)# I have an A100 GPU with 40GB of RAM 😎
 
 train_dataloader = DataLoader(
-    train_ds_packed,
+    train_dataset,
     batch_size=config.batch_size,
-    collate_fn=default_data_collator, 
+    collate_fn=collate_fn, 
 )
 
 eval_dataloader = DataLoader(
-    eval_ds_packed,
+    eval_dataset,
     batch_size=config.batch_size,
-    collate_fn=default_data_collator,
+    collate_fn=collate_fn,
     shuffle=False,
 )
 # Update with the size of the dataloader now that we know it
@@ -144,8 +157,6 @@ def prepare_model(config):
     print("\nFinal param count:")
     param_count(model)
     return model
-
-
         
 def param_count(m):
     params = sum([p.numel() for p in m.parameters()])/1_000_000
@@ -163,7 +174,6 @@ scheduler = get_cosine_schedule_with_warmup(
     num_training_steps=config.total_train_steps,
     num_warmup_steps=config.total_train_steps // 10,
 )
-
 
 def generate(prompt, tokenizer):
     tokenized_prompt = tokenizer(prompt, return_tensors='pt')['input_ids'].cuda()

@@ -60,9 +60,13 @@ def save_model(model, model_name, models_folder="models", log=False):
     tokenizer = AutoTokenizer.from_pretrained(model.name_or_path)
     tokenizer.save_pretrained(model_name)
     if log:
+        # if wandb.__version__ > "0.15.2":
+        #     wandb.log_model(file_name, model_name)
+        # else:
         at = wandb.Artifact(model_name, type="model")
         at.add_dir(file_name)
         wandb.log_artifact(at)
+
         
 def to_gpu(tensor_dict):
     return {k: v.to('cuda') for k, v in tensor_dict.items()}

@@ -1,6 +1,15 @@
 ## Different ways of creating an Instruction dataset
 ## https://wandb.ai/capecape/alpaca_ft/reports/Exploring-Collation-methods-Different-ways-to-construct-a-batch--Vmlldzo1ODczNjE5
 
+def collate_and_pad(tokenizer):
+    "Collate that pads to longest sample, very inneficient"
+    def _inner(examples):
+        examples = [x["prompt"]+x["output"]+tokenizer.eos_token for x in examples]
+        batch_size = len(examples)
+        input_ids = tokenizer(examples, return_tensors='pt', padding="longest")['input_ids']
+        batch = {'input_ids': input_ids[:, :-1], 'labels': input_ids[:, 1:]}
+        return batch
+    return _inner
 
 def pad_to_len(seq, max_seq_len, pad_token_id):
     "Pad a `seq` to `max_seq_len` with `pad_token_id`"
