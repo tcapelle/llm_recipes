@@ -115,24 +115,27 @@ tokenizer.pad_token = tokenizer.eos_token
 
 if config.packing:
     pack = packing_func(config.pad, config.mask_prompt)
-    train_dataset = pack(train_dataset, tokenizer, config.max_seq_len)
-    eval_dataset = pack(eval_dataset, tokenizer, config.max_seq_len)
+    proc_train_dataset = pack(train_dataset, tokenizer, config.max_seq_len)
+    proc_eval_dataset = pack(eval_dataset, tokenizer, config.max_seq_len)
     collate_fn = default_data_collator
 else:
     collate_fn = collate_and_pad(tokenizer)
+    proc_train_dataset = train_dataset
+    proc_eval_dataset = eval_dataset
     print("No packing, we are going to train for long!")
+
 print(f"Final number of train samples: {len(train_dataset)}")
 
 torch.manual_seed(config.seed)# I have an A100 GPU with 40GB of RAM 😎
 
 train_dataloader = DataLoader(
-    train_dataset,
+    proc_train_dataset,
     batch_size=config.batch_size,
     collate_fn=collate_fn, 
 )
 
 eval_dataloader = DataLoader(
-    eval_dataset,
+    proc_eval_dataset,
     batch_size=config.batch_size,
     collate_fn=collate_fn,
     shuffle=False,

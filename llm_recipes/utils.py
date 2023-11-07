@@ -11,14 +11,25 @@ from datasets import load_from_disk
 
 import evaluate
 import torch
-from transformers import GenerationConfig, AutoTokenizer
+from transformers import GenerationConfig, AutoTokenizer, AutoModelForCausalLM
 from transformers.integrations import WandbCallback
+
+def str2bool(v):
+    "Fix Argparse to process bools"
+    if isinstance(v, bool):
+        return v
+    if v.lower() == 'true':
+        return True
+    elif v.lower() == 'false':
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
 
 def parse_args(config):
     print("Running with the following config")
     parser = argparse.ArgumentParser(description='Run training baseline')
     for k,v in config.__dict__.items():
-        parser.add_argument('--'+k, type=type(v), default=v)
+        parser.add_argument('--'+k, type=type(v) if type(v) is not bool else str2bool, default=v)
     args = vars(parser.parse_args())
     
     # update config with parsed args
@@ -45,7 +56,41 @@ def load_ds_from_artifact(at_address, at_type="dataset"):
     artifact_dir = artifact.download()
     return load_from_disk(artifact_dir)
 
-def save_model(model, model_name, models_folder="models", log=False):
+
+def model_class(model_path):
+    if list(model_path.glob("*adapter*")):
+        return AutoPeftModelForCausalLM
+    return AutoModelForCausalLM
+
+def load_model_from_artifact(model_at, **model_kwargs):
+    """Load model and tokenizer from W&B
+    If the tokenizer is not present, we load a pretrained from the hub"""
+    if not wandb.run:
+        from wandb import Api
+        api = Api()
+        artifact = api.artifact(model_at, type="model")
+    else:
+        artifact = wandb.use_artifact(model_at, type="model")
+    artifact_dir = Path(artifact.download())
+    
+    model = model_class(artifact_dir).from_pretrained(
+        artifact_dir,
+        **model_kwargs)
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(artifact_dir)
+        tokenizer.pad_token = tokenizer.eos_token
+    except:
+        model_id = artifact.metadata.get("model_id")
+        if model_id is None:
+            producer_run = artifact.logged_by()
+            config = producer_run.config
+            model_id = config.get("model_id")
+        print(f"Tokenizer not found.\nLoading a pretrained tokenizer from the HF-hub: {model_id}")
+        tokenizer = AutoTokenizer.from_pretrained(model_id)
+        tokenizer.pad_token = tokenizer.eos_token
+    return model, tokenizer, artifact_dir
+
+def save_model(model, model_name, models_folder="models", log=False, **artifact_kwargs):
     """Save the model to wandb as an artifact
     Args:
         model (nn.Module): Model to save.
@@ -58,12 +103,12 @@ def save_model(model, model_name, models_folder="models", log=False):
     model.save_pretrained(file_name, safe_serialization=True)
     # save tokenizer for easy inference
     tokenizer = AutoTokenizer.from_pretrained(model.name_or_path)
-    tokenizer.save_pretrained(model_name)
+    tokenizer.save_pretrained(file_name)
     if log:
         # if wandb.__version__ > "0.15.2":
         #     wandb.log_model(file_name, model_name)
         # else:
-        at = wandb.Artifact(model_name, type="model")
+        at = wandb.Artifact(model_name, type="model", **artifact_kwargs)
         at.add_dir(file_name)
         wandb.log_artifact(at)
 
