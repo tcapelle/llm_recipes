@@ -1,0 +1,12 @@
+# You can run this by doing
+# docker un
+# Use an official PyTorch runtime as a parent image
+FROM pytorch/pytorch:latest
+
+# Install any needed packages specified in requirements.txt
+RUN python3 -m pip install transformers trl peft wandb datasets accelerate
+
+RUN python3 -m pip install --no-cache-dir bitsandbytes
+
+# Activate the virtualenv
+CMD ["/bin/bash"]
