@@ -175,11 +175,21 @@ class LLMSampleCB(WandbCallback):
         self.log_generations_table(self.sample_dataset)
         
 def freeze(model, n_freeze, freeze_embed):
+    if n_freeze == -1:
+        return model
+
+    def _find_mod(model, module_name="layers"):
+        for name, mod in model.named_modules():
+            if name.endswith(module_name):
+                return mod
     # freeze layers (disable gradients)
     for param in model.parameters(): param.requires_grad = False
     for param in model.lm_head.parameters(): param.requires_grad = True
-    for param in model.model.layers[n_freeze:].parameters(): param.requires_grad = True
+
+    layers = _find_mod(model, "layers")
+    for param in layers[n_freeze:].parameters(): param.requires_grad = True
 
     # Just freeze embeddings for small memory decrease
     if freeze_embed:
-        model.model.embed_tokens.weight.requires_grad_(False);
+        embed_tokens = _find_mod(model, "embed_tokens")
+        embed_tokens.weight.requires_grad_(False);

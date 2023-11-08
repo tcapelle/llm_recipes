@@ -1,4 +1,6 @@
-./wandb/
-./artifacts/
+models/
+wandb/
+artifacts/
+*egg*
 *cache*
 *checkpoint*

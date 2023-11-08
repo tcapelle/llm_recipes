@@ -3,10 +3,17 @@
 # Use an official PyTorch runtime as a parent image
 FROM pytorch/pytorch:latest
 
+# setup workdir
+USER root
+WORKDIR /root/src
+RUN mkdir -p /root/src
+COPY . /root/src/
+
 # Install any needed packages specified in requirements.txt
-RUN python3 -m pip install transformers trl peft wandb datasets accelerate
+RUN python -m pip install --no-cache-dir -r requirements.txt
 
-RUN python3 -m pip install --no-cache-dir bitsandbytes
+# install our lib
+RUN python -m pip install .
 
-# Activate the virtualenv
+# Entry Point
 CMD ["/bin/bash"]

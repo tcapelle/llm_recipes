@@ -4,3 +4,4 @@ peft
 bitsandbytes
 accelerate
 datasets
+evaluate
