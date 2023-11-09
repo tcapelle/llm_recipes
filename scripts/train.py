@@ -41,7 +41,6 @@ config = SimpleNamespace(
     seed=42,
     precision="bf16",  # faster and better than fp16, requires new GPUs
     n_freeze=24,  # How many layers we don't train, LLama 7B has 32.
-    freeze_pct=0.8,  # randomly freeze par of the model
     lr=1e-4,
     n_eval_samples=10, # How many samples to generate on validation
     max_seq_len=1024, # Lenght of the sequences to pack
@@ -119,7 +118,7 @@ if config.packing:
     proc_eval_dataset = pack(eval_dataset, tokenizer, config.max_seq_len)
     collate_fn = default_data_collator
 else:
-    collate_fn = collate_and_pad(tokenizer)
+    collate_fn = collate_and_pad(tokenizer, mask_prompt=config.mask_prompt)
     proc_train_dataset = train_dataset
     proc_eval_dataset = eval_dataset
     print("No packing, we are going to train for long!")
