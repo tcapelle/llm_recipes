@@ -37,14 +37,26 @@ def get_alpaca_split(dataset_at = DEFAULT_ALPACA_SPLIT):
     print(train_dataset[0])
     return train_dataset, eval_dataset
 
-def collate_and_pad(tokenizer):
+def collate_and_pad(tokenizer, mask_prompt=False):
     "Collate that pads to longest sample, very inneficient"
-    def _inner(examples):
-        examples = [x["prompt"]+x["output"]+tokenizer.eos_token for x in examples]
-        batch_size = len(examples)
-        input_ids = tokenizer(examples, return_tensors='pt', padding="longest")['input_ids']
-        batch = {'input_ids': input_ids[:, :-1], 'labels': input_ids[:, 1:]}
-        return batch
+
+    if mask_prompt:
+        def _inner(examples):
+            input_ids = tokenizer([x["prompt"]+x["output"]+tokenizer.eos_token for x in examples], 
+                                  return_tensors='pt', padding="longest")['input_ids']
+            prompts = tokenizer([x["prompt"] for x in examples])
+            for prompt, input_id in zip(prompts, input_ids):
+                input_id[:len(prompt)] = -100  # mask instructions
+            batch = {'input_ids': input_ids[:, :-1], 'labels': input_ids[:, 1:]}
+            return batch
+    else:        
+        def _inner(examples):
+            examples = [x["prompt"]+x["output"]+tokenizer.eos_token for x in examples]
+            batch_size = len(examples)
+            input_ids = tokenizer(examples, return_tensors='pt', padding="longest")['input_ids']
+            batch = {'input_ids': input_ids[:, :-1], 'labels': input_ids[:, 1:]}
+            return batch    
+    
     return _inner
 
 def pad_to_len(seq, max_seq_len, pad_token_id):

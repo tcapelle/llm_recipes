@@ -1,4 +1,4 @@
-import json, argparse
+import os, glob, json, argparse
 from ast import literal_eval
 from functools import partial
 from tqdm.auto import tqdm
@@ -90,6 +90,14 @@ def load_model_from_artifact(model_at, **model_kwargs):
         tokenizer.pad_token = tokenizer.eos_token
     return model, tokenizer, artifact_dir
 
+
+
+def get_latest_file(path):
+    files = glob.glob(path + "/*")
+    latest_file = max(files, key=os.path.getctime)
+    print("Latest created file is: ", latest_file)
+    return latest_file
+
 def save_model(model, model_name, models_folder="models", log=False, **artifact_kwargs):
     """Save the model to wandb as an artifact
     Args:
@@ -173,7 +181,13 @@ class LLMSampleCB(WandbCallback):
     def on_evaluate(self, args, state, control,  **kwargs):
         super().on_evaluate(args, state, control, **kwargs)
         self.log_generations_table(self.sample_dataset)
-        
+
+def param_count(model):
+    params = sum([p.numel() for p in model.parameters()])/1_000_000
+    trainable_params = sum([p.numel() for p in model.parameters() if p.requires_grad])/1_000_000
+    print(f"Total params: {params:.2f}M, Trainable: {trainable_params:.2f}M")
+    return params, trainable_params
+    
 def freeze(model, n_freeze, freeze_embed):
     if n_freeze == -1:
         return model
