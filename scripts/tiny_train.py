@@ -26,18 +26,19 @@ config = SimpleNamespace(
     eval_steps=1000, # save model here
     dataloader_num_workers=6,
     dataset_shard=0,
-    test_size=0.05,
+    test_size=0.02,
     seed=42,
 )
 
 parse_args(config)
 
-def get_datasets(ds_name, total_shards=1, shard=0, seed=42, test_size=0.05):
+def get_datasets(ds_name, total_shards=1, shard=0, seed=42, test_size=0.02):
     "Let's shard so resuming is easier"
     ds = load_dataset(DATASET_NAME)["train"]
     splitted_ds = ds.shuffle(seed=seed).train_test_split(test_size=test_size, seed=seed)
     train_ds = splitted_ds["train"].shard(total_shards, shard)
-    eval_ds = splitted_ds["test"].shard(total_shards, shard)
+    eval_ds = splitted_ds["test"]
+    print(f"Train samples {len(train_ds)} (shard={shard+1}/{total_shards-1}) / Eval samples {len(eval_ds)}")
     return train_ds, eval_ds
 
 train_ds, eval_ds = get_datasets(
@@ -80,13 +81,13 @@ model, llama_config = create_tiny_llama(model_config)
 
 
 ## MFU computations
-N = sum(p.numel() for p in self.parameters())
-L, H, Q, T = cfg.num_hidden_layers, cfg.num_attention_heads, cfg.dim//cfg.num_attention_heads, cfg.max_seq_len
-flops_per_token = 6*N + 12*L*H*Q*T
-flops_per_fwdbwd = flops_per_token * T
-flops_per_iter = config.batch_size * config.gradient_accumulation_steps * fwdbwd_per_iter
-
-def flops(dt)
+def _model_flops(config, dt):
+    "TODO: Refactor stuff that is computed once"
+    N = sum(p.numel() for p in model.parameters())
+    L, H, Q, T = cfg.num_hidden_layers, cfg.num_attention_heads, cfg.dim//cfg.num_attention_heads, cfg.max_seq_len
+    flops_per_token = 6*N + 12*L*H*Q*T
+    flops_per_fwdbwd = flops_per_token * T
+    flops_per_iter = config.batch_size * config.gradient_accumulation_steps * fwdbwd_per_iter
     return flops_per_iter * (1.0/dt)
 #####################
 
