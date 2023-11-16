@@ -158,29 +158,31 @@ def _generate(prompt, model, tokenizer, gen_config):
 
 
 class LLMSampleCB(WandbCallback):
-    def __init__(self, trainer, test_dataset, num_samples=10, max_new_tokens=256):
+    def __init__(self, trainer, test_dataset, num_samples=10, max_new_tokens=256, log_model="checkpoint"):
         super().__init__()
+        self._log_model = log_model
         self.sample_dataset = test_dataset.select(range(num_samples))
+        self.model, self.tokenizer = trainer.model, trainer.tokenizer
         self.gen_config = GenerationConfig.from_pretrained(trainer.model.name_or_path,
                                                            max_new_tokens=max_new_tokens)
-        tokenizer = AutoTokenizer.from_pretrained(trainer.model.name_or_path)
-        tokenizer.pad_token = tokenizer.eos_token
-        self.generate = partial(_generate, 
-                                model=trainer.model, 
-                                tokenizer=tokenizer, 
-                                gen_config=self.gen_config)
-
-    def log_generations_table(self, examples):
+    def generate(self, prompt):
+        tokenized_prompt = self.tokenizer(prompt, return_tensors='pt')['input_ids'].cuda()
+        with torch.inference_mode():
+            output = self.model.generate(tokenized_prompt, generation_config=self.gen_config)
+        return self.tokenizer.decode(output[0][len(tokenized_prompt[0]):], skip_special_tokens=True)
+    
+    def samples_table(self, examples):
         records_table = wandb.Table(columns=["prompt", "generation"] + list(self.gen_config.to_dict().keys()))
         for example in tqdm(examples, leave=False):
             prompt = example["text"]
-            generation = self.generate(prompt=prompt[-1000:])
+            generation = self.generate(prompt=prompt)
             records_table.add_data(prompt, generation, *list(self.gen_config.to_dict().values()))
-        self._wandb.log({"sample_predictions":records_table})
-    
+        return records_table
+        
     def on_evaluate(self, args, state, control,  **kwargs):
         super().on_evaluate(args, state, control, **kwargs)
-        self.log_generations_table(self.sample_dataset)
+        records_table = self.samples_table(self.sample_dataset)
+        self._wandb.log({"sample_predictions":records_table})
 
 def param_count(model):
     params = sum([p.numel() for p in model.parameters()])/1_000_000
