@@ -197,21 +197,23 @@ def prompt_table(examples, log=False, table_name="predictions"):
 
 
 @torch.no_grad()
-def validate(samples=eval_dataset):
-    model.eval();
+def validate():
+    model.eval()
     eval_acc = Accuracy()
+    loss, total_steps = 0., 0
     for step, batch in enumerate(pbar:=tqdm(eval_dataloader, leave=False)):
         pbar.set_description(f"doing validation")
         batch = to_gpu(batch)
+        total_steps += 1
         with torch.amp.autocast("cuda", dtype=torch.bfloat16):
             out = model(**batch)
-            loss = flat_cross_entropy(out.logits, batch["labels"])
+            loss += loss_fn(out.logits, batch["labels"])  # you could use out.loss and not shift the dataset
         eval_acc.update(out.logits, batch["labels"])
     # we log results at the end
-    wandb.log({"eval_loss": loss.item(),
-               "eval_accuracy": eval_acc.compute()})
-    prompt_table(samples[:config.n_eval_samples], log=True)
-    model.train();
+    wandb.log({"eval/loss": loss.item() / total_steps,
+               "eval/accuracy": eval_acc.compute()})
+    prompt_table(eval_dataset[:config.n_eval_samples], log=True)
+    model.train()
 
 
 acc = Accuracy()
@@ -222,20 +224,19 @@ for epoch in tqdm(range(config.epochs)):
         batch = to_gpu(batch)
         with torch.amp.autocast("cuda", dtype=torch.bfloat16):
             out = model(**batch)
-            loss = flat_cross_entropy(out.logits, batch["labels"]) / config.gradient_accumulation_steps
+            loss = loss_fn(out.logits, batch["labels"]) / config.gradient_accumulation_steps  # you could use out.loss and not shift the dataset  
+            loss.backward()
         if step%config.gradient_accumulation_steps == 0:
             # we can log the metrics to W&B
-            wandb.log({"train_loss": loss.item() * config.gradient_accumulation_steps,
-                       "train_accuracy": acc.update(out.logits, batch["labels"]),
-                       "lr": scheduler.get_last_lr()[0]})
-            loss.backward()
+            wandb.log({"train/loss": loss.item() * config.gradient_accumulation_steps,
+                       "train/accuracy": acc.update(out.logits, batch["labels"]),
+                       "train/learning_rate": scheduler.get_last_lr()[0],
+                       "train/global_step": train_step})
             optim.step()
             scheduler.step()
             optim.zero_grad(set_to_none=True)
             train_step += 1
-
-            if train_step%config.eval_every==0 or train_step%(config.total_train_steps-1)==0:
-                validate(eval_dataset)    
+    validate()    
 # we save the model checkpoint at the end
 save_model(model, model_name=config.model_id.replace("/", "_"), models_folder="models/", log=config.log_model)
 wandb.finish()
