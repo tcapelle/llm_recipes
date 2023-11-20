@@ -19,13 +19,15 @@ WANDB_TAGS = ["7b", "hf_sft"]
 config = SimpleNamespace(
     dataset_at='capecape/alpaca_ft/alpaca_gpt4_splitted:latest',
     model_id = 'meta-llama/Llama-2-7b-hf',
-    n_freeze = 24,
-    batch_size = 8,
-    num_train_epochs = 3,
+    n_freeze = 24, # how many layers to freeze on the model (llama 7b has 32)
+    batch_size = 8, # what my GPU can handle, depends on how many layers are we training
+    num_train_epochs = 3, # we do 3 pasess over the dataset.
     freeze_embed = True,
 )
 
 # some sane defaults computations
+ALPACA_TOTAL_PACKED_SAMPLES = 11_210
+
 config.gradient_accumulation_steps = 32 // config.batch_size
 config.total_num_steps = config.num_train_epochs * ALPACA_TOTAL_PACKED_SAMPLES // (config.batch_size * config.gradient_accumulation_steps)
 config.eval_steps = config.total_num_steps // config.num_train_epochs
