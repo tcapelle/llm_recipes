@@ -10,6 +10,7 @@ from datasets import load_dataset
 
 from llm_recipes.data import create_alpaca_prompt
 from llm_recipes.utils import freeze, parse_args
+from llm_recipes.hf import create_peft_model
 
 ALPACA_TOTAL_PACKED_SAMPLES = 11_210
 WANDB_PROJECT = "alpaca_ft"
@@ -20,15 +21,18 @@ config = SimpleNamespace(
     dataset_at='capecape/alpaca_ft/alpaca_gpt4_splitted:latest',
     model_id = 'meta-llama/Llama-2-7b-hf',
     n_freeze = 24, # how many layers to freeze on the model (llama 7b has 32)
-    batch_size = 8, # what my GPU can handle, depends on how many layers are we training
+    batch_size = 4, # what my GPU can handle, depends on how many layers are we training
+    effective_batch_size = 32, # batch size for gradient accumulation
+    gradient_checkpointing = True,
     num_train_epochs = 3, # we do 3 pasess over the dataset.
     freeze_embed = True,
+    use_lora = True,
 )
 
 # some sane defaults computations
 ALPACA_TOTAL_PACKED_SAMPLES = 11_210
 
-config.gradient_accumulation_steps = 32 // config.batch_size
+config.gradient_accumulation_steps = config.effective_batch_size // config.batch_size
 config.total_num_steps = config.num_train_epochs * ALPACA_TOTAL_PACKED_SAMPLES // (config.batch_size * config.gradient_accumulation_steps)
 config.eval_steps = config.total_num_steps // config.num_train_epochs
 
@@ -53,7 +57,7 @@ def get_train_args(config, output_dir = "./output/"):
         # num_train_epochs=config.num_train_epochs,
         max_steps=config.total_num_steps,
         gradient_accumulation_steps=config.gradient_accumulation_steps,
-        gradient_checkpointing=True,
+        gradient_checkpointing=config.gradient_checkpointing,
         evaluation_strategy="steps",
         eval_steps=config.eval_steps,
         # logging strategies
@@ -70,8 +74,16 @@ def main(config):
         trust_remote_code=True,
         low_cpu_mem_usage=True,
         torch_dtype=torch.bfloat16,
+        use_cache=False,
     )
-    freeze(model, config.n_freeze, config.freeze_embed)
+    if config.use_lora:
+        model, peft_config = create_peft_model(model, config.gradient_checkpointing)
+        config.peft_config = peft_config
+        print("Using LoRA, ignoring freeze_embed")
+    else:
+        freeze(model, config.n_freeze, config.freeze_embed)
+
+    # wandb stuff
     wandb.init(project=WANDB_PROJECT, 
                entity=WANDB_ENTITY, 
                job_type="train",
