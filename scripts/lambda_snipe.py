@@ -2,6 +2,7 @@ import argparse, os, time, requests, json
 
 LAMBDA_API_KEY = os.environ["LAMBDA_API_KEY"]
 SSH_KEYS = ["MBP"]
+T = 5
 
 def fetch_data(url, headers, method='get', data=None):
     return requests.post(url, headers=headers, data=json.dumps(data)).json() if method == 'post' else requests.get(url, headers=headers).json()
@@ -28,7 +29,7 @@ def main():
     args = parser.parse_args()
     gpu_type = f"{args.n}x_{args.gpu}"
 
-    print(f"Looking on LambdaLabs for a machine of type: {gpu_type}, retrying every 10 seconds...")
+    print(f"Looking on LambdaLabs for a machine of type: {gpu_type}, retrying every {T} seconds...")
 
     while True:
         instance_type_name, region = check_availability(gpu_type)
@@ -36,7 +37,7 @@ def main():
             print(f"Instance found! {instance_type_name} in {region}")
             print(json.dumps(create_instance(instance_type_name, region), indent=4))
             break
-        time.sleep(10)
+        time.sleep(T)
         
 if __name__ == "__main__":
     main()
