@@ -14,6 +14,7 @@ config = SimpleNamespace(
     gradient_checkpointing = False,
     use_lora=False,
     train_steps=10,
+    optimizer="SGD", # any torch.optim optimizer name
 )
 if __name__ == "__main__":
     parse_args(config)
@@ -55,7 +56,12 @@ if __name__ == "__main__":
         model = get_peft_model(model, peft_config)
     trainable_params = sum([p.numel() for p in model.parameters() if p.requires_grad])/1_000_000
     print(f"Trainable params: {trainable_params}M / {sum([p.numel() for p in model.parameters()])/1_000_000:.2f}M")
-
+    
+    if config.optimizer != "no":
+        opt_func = getattr(torch.optim, config.optimizer)
+        optim = opt_func(model.parameters(), lr=0.001)
+        print(f"Optimizer: {config.optimizer}")
+    
     model.train()
     for i in range(config.train_steps):
         t0 = time.perf_counter()
@@ -65,7 +71,10 @@ if __name__ == "__main__":
             loss.backward()
         delta_t = time.perf_counter() - t0
         wandb.log({"time":delta_t, "it_s": config.batch_size/delta_t})
+        if config.optimizer != "no":
+            optim.step()
+            optim.zero_grad(set_to_none=True)
 
-    memory_usage = torch.cuda.max_memory_allocated() / 1024 / 1024 / 1024
+    memory_usage = torch.cuda.max_memory_allocated() / 1000**3
     print(f"Memory usage: {memory_usage:.2f}GB")
     wandb.summary["memory_GB"] = memory_usage

@@ -1,0 +1,16 @@
+program: minimal_lora.py
+method: grid
+entity: capecape
+project: debug_lora
+
+parameters:
+  model_id: 
+    value: 'meta-llama/Llama-2-7b-hf'
+  n_freeze:
+    values: [0, 24]
+  freeze_embed:
+    values: ['True', 'False']
+  gradient_checkpointing:
+    values: ['True', 'False']
+  use_lora:
+    values: ['True', 'False']
