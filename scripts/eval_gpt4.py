@@ -122,7 +122,8 @@ def agree_check(row):
     
 if __name__ == "__main__":
     parse_args(config)
-    out_dir = Path(config.out_dir).mkdir(parents=True, exist_ok=True)
+    out_dir = Path(config.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
     # create a run to have lineage
     wandb.init(project=WANDB_PROJECT, entity=WANDB_ENTITY, job_type="eval", tags=["gpt-4"], config=config)
     
@@ -151,11 +152,13 @@ if __name__ == "__main__":
     # Lets use a better naming than 0,1,2
     choices = ["both",] + config.model_names
     final_results["choice_name"] = [choices[c] for c in final_results["choice"]]
-    print("\n### GPT JUDGE RESULTS ###\n###################################")
+    print("\n### GPT JUDGE RESULTS ###")
+    print("###########################")
     print(final_results["choice_name"].value_counts())
+    print("###########################")
 
-    gpt4_table.to_csv(out_dir/"gpt4_eval.csv")
-    gpt4_table  = wandb.Table(dataframe=final_results)
+    final_results.to_csv(out_dir/"gpt4_eval.csv")
+    gpt4_table = wandb.Table(dataframe=final_results)
     wandb.log({"gpt4_eval":gpt4_table})   
 
     disagree_df["choice"] = [choices[c] for c in disagree_df["choice"]]
