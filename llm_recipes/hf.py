@@ -1,4 +1,34 @@
+from transformers import Trainer
 from peft import LoraConfig, get_peft_model
+
+def debug_trainer_data(trainer: Trainer):
+    print("Computing Dataset Stats...")
+    train_ds = trainer.train_dataset
+    train_ds.infinite = False
+    eval_ds = trainer.eval_dataset
+    eval_ds.infinite = False
+    len_train_ds = sum(1 for _ in train_ds)
+    len_eval_ds = sum(1 for _ in eval_ds)
+    print(
+        f"  len(train_ds): {len_train_ds}\n"
+        f"  len(eval_ds) : {len_eval_ds}\n"
+    )
+    train_dl = trainer.get_train_dataloader()
+    train_dl.dataset.infinite = False
+    eval_dl = trainer.get_eval_dataloader()
+    eval_dl.dataset.infinite = False
+    len_train_dl = sum(1 for _ in train_dl)
+    len_eval_dl = sum(1 for _ in eval_dl)
+    b = next(iter(train_dl))
+    input_ids, labels = b["input_ids"], b["labels"]
+    
+    print(
+        f"  len(train_dl): {len_train_dl}\n"
+        f"  len(eval_dl) : {len_eval_dl}\n"
+        f"  batch_shape  : {input_ids.shape}\n"
+    )
+    tokenizer = trainer.tokenizer
+    print(f"First batch:\ninput_ids:{tokenizer.decode(input_ids}\nlabels:{input_ids:{tokenizer.decode(labels)")
 
 DEFAULT_LORA_CONFIG = LoraConfig(
     r=64,  # the rank of the LoRA matrices
@@ -16,7 +46,7 @@ def create_peft_model(
     # create the LoRA config
 
     if gradient_checkpointing:
-        model.gradient_checkpointing_enable()
+        model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False}) 
 
     model = get_peft_model(model, peft_config)
     model.print_trainable_parameters()

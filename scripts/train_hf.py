@@ -8,8 +8,10 @@ from trl import SFTTrainer
 from datasets import load_dataset
 from peft import LoraConfig, get_peft_model
 
-from llm_recipes.data import create_alpaca_prompt
+from llm_recipes.data import create_alpaca_prompt, create_alpaca_prompt_with_response
 from llm_recipes.utils import freeze, parse_args, LLMSampleCB
+from llm_recipes.hf import debug_trainer_data
+
 
 ALPACA_TOTAL_PACKED_SAMPLES = 11_210
 WANDB_PROJECT = "alpaca_ft"
@@ -28,9 +30,10 @@ config = SimpleNamespace(
     use_lora = False,
     lr = 2e-5,
     # for debug purposes
-    max_steps=1e10, 
+    max_steps=-1, 
     train=True,
     evaluate=True,
+    debug_data=False,
 )
 
 def get_alpaca_ds(dataset_at):
@@ -67,7 +70,9 @@ def get_train_args(config, output_dir = "./output/"):
 def main(config):
     # some sane defaults computations
     config.gradient_accumulation_steps = config.effective_batch_size // config.batch_size
-    config.max_steps = min(config.num_train_epochs * ALPACA_TOTAL_PACKED_SAMPLES // (config.batch_size * config.gradient_accumulation_steps), config.max_steps)
+    if config.max_steps == -1:
+        config.max_steps = config.num_train_epochs * ALPACA_TOTAL_PACKED_SAMPLES // (config.batch_size * config.gradient_accumulation_steps)
+    if config.debug: config.max_steps = -1
     config.eval_steps = config.max_steps // config.num_train_epochs
     
     model = AutoModelForCausalLM.from_pretrained(
@@ -110,17 +115,15 @@ def main(config):
         packing=True,
         max_seq_length=1024,
         args=training_args,
-        formatting_func=create_alpaca_prompt,
+        formatting_func=create_alpaca_prompt_with_response,
     )
+    if config.debug_data:
+        debug_trainer_data(trainer)
+        return
     if config.train: 
         trainer.train()
-    if config.evaluate:
-        # Let's run evaluation at the end once
-        def create_prompt_no_anwer(row):
-            row["output"] = ""
-            return {"text": create_alpaca_prompt(row)}
-    
-        test_dataset = eval_dataset.map(create_prompt_no_anwer)
+    if config.evaluate:    
+        test_dataset = eval_dataset.map(create_alpaca_prompt) # no answers
         wandb_callback = LLMSampleCB(trainer, test_dataset, num_samples=10, max_new_tokens=256)
         trainer.add_callback(wandb_callback)
         trainer.evaluate()
