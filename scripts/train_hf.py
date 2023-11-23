@@ -28,7 +28,7 @@ config = SimpleNamespace(
     use_lora = False,
     lr = 2e-5,
     # for debug purposes
-    total_num_steps=-1, 
+    max_steps=1e10, 
     train=True,
     evaluate=True,
 )
@@ -50,7 +50,7 @@ def get_train_args(config, output_dir = "./output/"):
         learning_rate=config.lr,
         lr_scheduler_type="cosine",
         warmup_ratio=0.1,
-        max_steps=config.total_num_steps,
+        max_steps=config.max_steps,
         gradient_accumulation_steps=config.gradient_accumulation_steps,
         gradient_checkpointing=config.gradient_checkpointing,
         gradient_checkpointing_kwargs={"use_reentrant": False},
@@ -67,8 +67,8 @@ def get_train_args(config, output_dir = "./output/"):
 def main(config):
     # some sane defaults computations
     config.gradient_accumulation_steps = config.effective_batch_size // config.batch_size
-    config.total_num_steps = config.num_train_epochs * ALPACA_TOTAL_PACKED_SAMPLES // (config.batch_size * config.gradient_accumulation_steps)
-    config.eval_steps = config.total_num_steps // config.num_train_epochs
+    config.max_steps = min(config.num_train_epochs * ALPACA_TOTAL_PACKED_SAMPLES // (config.batch_size * config.gradient_accumulation_steps), config.max_steps)
+    config.eval_steps = config.max_steps // config.num_train_epochs
     
     model = AutoModelForCausalLM.from_pretrained(
         config.model_id,
