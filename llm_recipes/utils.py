@@ -93,7 +93,6 @@ def load_model_from_artifact(model_at, **model_kwargs):
     return model, tokenizer, artifact_dir
 
 
-
 def get_latest_file(path):
     files = glob.glob(path + "/*")
     latest_file = max(files, key=os.path.getctime)
@@ -170,7 +169,7 @@ class LLMSampleCB(WandbCallback):
     def generate(self, prompt):
         tokenized_prompt = self.tokenizer(prompt, return_tensors='pt')['input_ids'].cuda()
         with torch.inference_mode():
-            output = self.model.generate(tokenized_prompt, generation_config=self.gen_config)
+            output = self.model.generate(inputs=tokenized_prompt, generation_config=self.gen_config)
         return self.tokenizer.decode(output[0][len(tokenized_prompt[0]):], skip_special_tokens=True)
     
     def samples_table(self, examples):

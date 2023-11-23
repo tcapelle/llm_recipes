@@ -6,11 +6,10 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments
 from trl import SFTTrainer
 from datasets import load_dataset
-
+from peft import LoraConfig, get_peft_model
 
 from llm_recipes.data import create_alpaca_prompt
-from llm_recipes.utils import freeze, parse_args
-from llm_recipes.hf import create_peft_model
+from llm_recipes.utils import freeze, parse_args, LLMSampleCB
 
 ALPACA_TOTAL_PACKED_SAMPLES = 11_210
 WANDB_PROJECT = "alpaca_ft"
@@ -18,24 +17,21 @@ WANDB_ENTITY = "capecape"
 WANDB_TAGS = ["7b", "hf_sft"]
 
 config = SimpleNamespace(
-    dataset_at='capecape/alpaca_ft/alpaca_gpt4_splitted:latest',
+    dataset_at='capecape/alpaca_ft/alpaca_gpt4_splitted:v4',
     model_id = 'meta-llama/Llama-2-7b-hf',
     n_freeze = 24, # how many layers to freeze on the model (llama 7b has 32)
-    batch_size = 4, # what my GPU can handle, depends on how many layers are we training
+    batch_size = 8, # what my GPU can handle, depends on how many layers are we training
     effective_batch_size = 32, # batch size for gradient accumulation
     gradient_checkpointing = True,
     num_train_epochs = 3, # we do 3 pasess over the dataset.
     freeze_embed = True,
-    use_lora = True,
+    use_lora = False,
+    lr = 2e-5,
+    # for debug purposes
+    total_num_steps=-1, 
+    train=True,
+    evaluate=True,
 )
-
-# some sane defaults computations
-ALPACA_TOTAL_PACKED_SAMPLES = 11_210
-
-config.gradient_accumulation_steps = config.effective_batch_size // config.batch_size
-config.total_num_steps = config.num_train_epochs * ALPACA_TOTAL_PACKED_SAMPLES // (config.batch_size * config.gradient_accumulation_steps)
-config.eval_steps = config.total_num_steps // config.num_train_epochs
-
 
 def get_alpaca_ds(dataset_at):
     artifact = wandb.use_artifact(dataset_at, type='dataset')
@@ -51,15 +47,16 @@ def get_train_args(config, output_dir = "./output/"):
         per_device_train_batch_size=config.batch_size,
         per_device_eval_batch_size=config.batch_size//4,
         bf16=True,
-        learning_rate=2e-4,
+        learning_rate=config.lr,
         lr_scheduler_type="cosine",
         warmup_ratio=0.1,
-        # num_train_epochs=config.num_train_epochs,
         max_steps=config.total_num_steps,
         gradient_accumulation_steps=config.gradient_accumulation_steps,
         gradient_checkpointing=config.gradient_checkpointing,
-        evaluation_strategy="steps",
-        eval_steps=config.eval_steps,
+        gradient_checkpointing_kwargs={"use_reentrant": False},
+        # evaluation_strategy="steps",
+        # eval_steps=config.eval_steps,
+        evaluation_strategy="no",
         # logging strategies
         logging_strategy="steps",
         logging_steps=1,
@@ -68,6 +65,11 @@ def get_train_args(config, output_dir = "./output/"):
     return training_args
 
 def main(config):
+    # some sane defaults computations
+    config.gradient_accumulation_steps = config.effective_batch_size // config.batch_size
+    config.total_num_steps = config.num_train_epochs * ALPACA_TOTAL_PACKED_SAMPLES // (config.batch_size * config.gradient_accumulation_steps)
+    config.eval_steps = config.total_num_steps // config.num_train_epochs
+    
     model = AutoModelForCausalLM.from_pretrained(
         config.model_id,
         device_map="auto",
@@ -77,9 +79,17 @@ def main(config):
         use_cache=False,
     )
     if config.use_lora:
-        model, peft_config = create_peft_model(model, config.gradient_checkpointing)
+        peft_config = LoraConfig(
+                r=64,  # the rank of the LoRA matrices
+                lora_alpha=16, # the weight
+                lora_dropout=0.1, # dropout to add to the LoRA layers
+                bias="none", # add bias to the nn.Linear layers?
+                task_type="CAUSAL_LM",
+                target_modules=["q_proj", "k_proj","v_proj","o_proj"], # the name of the layers to add LoRA
+            )
+        model = get_peft_model(model, peft_config)
+        model.print_trainable_parameters()
         config.peft_config = peft_config
-        print("Using LoRA, ignoring freeze_embed")
     else:
         freeze(model, config.n_freeze, config.freeze_embed)
 
@@ -102,9 +112,19 @@ def main(config):
         args=training_args,
         formatting_func=create_alpaca_prompt,
     )
-    trainer.train()
+    if config.train: 
+        trainer.train()
+    if config.evaluate:
+        # Let's run evaluation at the end once
+        def create_prompt_no_anwer(row):
+            row["output"] = ""
+            return {"text": create_alpaca_prompt(row)}
+    
+        test_dataset = eval_dataset.map(create_prompt_no_anwer)
+        wandb_callback = LLMSampleCB(trainer, test_dataset, num_samples=10, max_new_tokens=256)
+        trainer.add_callback(wandb_callback)
+        trainer.evaluate()
 
 if __name__ == "__main__":
     parse_args(config)
-    # print(config)
     main(config)
