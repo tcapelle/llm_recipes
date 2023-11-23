@@ -72,8 +72,9 @@ def main(config):
     config.gradient_accumulation_steps = config.effective_batch_size // config.batch_size
     if config.max_steps == -1:
         config.max_steps = config.num_train_epochs * ALPACA_TOTAL_PACKED_SAMPLES // (config.batch_size * config.gradient_accumulation_steps)
-    if config.debug: config.max_steps = -1
     config.eval_steps = config.max_steps // config.num_train_epochs
+    if config.debug_data: 
+        config.max_steps = -1
     
     model = AutoModelForCausalLM.from_pretrained(
         config.model_id,

@@ -2,6 +2,8 @@ from transformers import Trainer
 from peft import LoraConfig, get_peft_model
 
 def debug_trainer_data(trainer: Trainer):
+    """Print a bunch of debug info about how the packed dataset is being constructed.
+    We set everythin to finite to avoid iterating forever"""
     print("Computing Dataset Stats...")
     train_ds = trainer.train_dataset
     train_ds.infinite = False
@@ -28,7 +30,11 @@ def debug_trainer_data(trainer: Trainer):
         f"  batch_shape  : {input_ids.shape}\n"
     )
     tokenizer = trainer.tokenizer
-    print(f"First batch:\ninput_ids:{tokenizer.decode(input_ids}\nlabels:{input_ids:{tokenizer.decode(labels)")
+    decoded_ids = tokenizer.decode(input_ids[0])[0:80]
+    decoded_labels = tokenizer.decode(labels[0])[0:80]
+    print("First batch:\n"
+          f"input_ids:\n{decoded_ids}\n"
+          f"labels:\n{decoded_labels}\n")
 
 DEFAULT_LORA_CONFIG = LoraConfig(
     r=64,  # the rank of the LoRA matrices
