@@ -96,6 +96,7 @@ def main(config):
         model = get_peft_model(model, peft_config)
         model.print_trainable_parameters()
         config.peft_config = peft_config
+        config.n_freeze = "all"
     else:
         freeze(model, config.n_freeze, config.freeze_embed)
 
@@ -124,7 +125,8 @@ def main(config):
     if config.train: 
         trainer.train()
     if config.evaluate:    
-        test_dataset = eval_dataset.map(create_alpaca_prompt) # no answers
+        def _map_func(row): return {"text": create_alpaca_prompt(row)}
+        test_dataset = eval_dataset.map(_map_func) # no answers
         wandb_callback = LLMSampleCB(trainer, test_dataset, num_samples=10, max_new_tokens=256)
         trainer.add_callback(wandb_callback)
         trainer.evaluate()
