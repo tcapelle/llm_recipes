@@ -1,15 +1,13 @@
-program: minimal_lora.py
+program: train_hf.py
 method: grid
 entity: capecape
-project: debug_lora
+project: alpaca_ft
 
 parameters:
   model_id: 
     value: 'meta-llama/Llama-2-7b-hf'
   n_freeze:
-    values: [0, 24]
-  freeze_embed:
-    values: ['True', 'False']
+    value: 24
   gradient_checkpointing:
     values: ['True', 'False']
   use_lora:
