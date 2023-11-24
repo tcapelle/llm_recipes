@@ -192,9 +192,8 @@ def param_count(model):
     return params, trainable_params
     
 def freeze(model, n_freeze, freeze_embed, module_name="layers"):
-    "Freeze layers on the model upt to `n_freeze`, maybe freeze embeding layer"
     if n_freeze > 0:
-        def _find_mod(model):
+        def _find_mod(model, module_name):
             for name, mod in model.named_modules():
                 if name.endswith(module_name):
                     return mod
@@ -204,7 +203,7 @@ def freeze(model, n_freeze, freeze_embed, module_name="layers"):
         # never freeze the head
         for param in model.lm_head.parameters(): param.requires_grad = True
     
-        layers = _find_mod(model)
+        layers = _find_mod(model, module_name)
         for param in layers[n_freeze:].parameters(): param.requires_grad = True
     
     # Freeze embeddings for small memory decrease
