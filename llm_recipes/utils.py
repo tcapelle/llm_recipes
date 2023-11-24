@@ -191,22 +191,23 @@ def param_count(model):
     print(f"Total params: {params:.2f}M, Trainable: {trainable_params:.2f}M")
     return params, trainable_params
     
-def freeze(model, n_freeze, freeze_embed):
-    if n_freeze == -1:
-        return model
+def freeze(model, n_freeze, freeze_embed, module_name="layers"):
+    "Freeze layers on the model upt to `n_freeze`, maybe freeze embeding layer"
+    if n_freeze > 0:
+        def _find_mod(model):
+            for name, mod in model.named_modules():
+                if name.endswith(module_name):
+                    return mod
+        # freeze layers (disable gradients)
+        for param in model.parameters(): param.requires_grad = False
 
-    def _find_mod(model, module_name="layers"):
-        for name, mod in model.named_modules():
-            if name.endswith(module_name):
-                return mod
-    # freeze layers (disable gradients)
-    for param in model.parameters(): param.requires_grad = False
-    for param in model.lm_head.parameters(): param.requires_grad = True
-
-    layers = _find_mod(model, "layers")
-    for param in layers[n_freeze:].parameters(): param.requires_grad = True
-
-    # Just freeze embeddings for small memory decrease
+        # never freeze the head
+        for param in model.lm_head.parameters(): param.requires_grad = True
+    
+        layers = _find_mod(model)
+        for param in layers[n_freeze:].parameters(): param.requires_grad = True
+    
+    # Freeze embeddings for small memory decrease
     if freeze_embed:
         embed_tokens = _find_mod(model, "embed_tokens")
         embed_tokens.weight.requires_grad_(False);
