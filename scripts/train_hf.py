@@ -72,10 +72,13 @@ def main(config):
     # some sane defaults computations
     config.gradient_accumulation_steps = (1024 // config.max_seq_length) * config.effective_batch_size // config.batch_size
     if config.max_steps == -1:
-        config.max_steps = config.num_train_epochs * ALPACA_TOTAL_PACKED_SAMPLES * (1024 // config.max_seq_length) // (config.batch_size * config.gradient_accumulation_steps)
+        config.max_steps = config.num_train_epochs * ALPACA_TOTAL_PACKED_SAMPLES // (config.batch_size * config.gradient_accumulation_steps)
     config.eval_steps = config.max_steps // config.num_train_epochs
     if config.debug_data: 
         config.max_steps = -1
+    config.tokens_per_step = config.max_seq_length * config.batch_size * config.gradient_accumulation_steps
+    print(f"\nWe are training for {config.max_steps} steps with an effective batch size of {config.effective_batch_size} and a gradient accumulation of {config.gradient_accumulation_steps} steps.")
+    print(f"Tokens per step max_seq_len * bs * grad_accum_steps: {config.tokens_per_step}\n")
     
     model = AutoModelForCausalLM.from_pretrained(
         config.model_id,
