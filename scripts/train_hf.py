@@ -70,7 +70,7 @@ def get_train_args(config, output_dir = "./output/"):
 
 def main(config):
     # some sane defaults computations
-    config.gradient_accumulation_steps = config.effective_batch_size // config.batch_size
+    config.gradient_accumulation_steps = (1024 // config.max_seq_length) * config.effective_batch_size // config.batch_size
     if config.max_steps == -1:
         config.max_steps = config.num_train_epochs * ALPACA_TOTAL_PACKED_SAMPLES * (1024 // config.max_seq_length) // (config.batch_size * config.gradient_accumulation_steps)
     config.eval_steps = config.max_steps // config.num_train_epochs
