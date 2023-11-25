@@ -13,7 +13,7 @@ from llm_recipes.utils import freeze, parse_args, LLMSampleCB
 from llm_recipes.hf import debug_trainer_data
 
 
-ALPACA_TOTAL_PACKED_SAMPLES = 11_210
+ALPACA_TOTAL_PACKED_SAMPLES = 11_210 # at seq_len=1024
 WANDB_PROJECT = "alpaca_ft"
 WANDB_ENTITY = "capecape"
 WANDB_TAGS = ["7b", "hf_sft"]
@@ -25,6 +25,7 @@ config = SimpleNamespace(
     batch_size = 8, # what my GPU can handle, depends on how many layers are we training
     effective_batch_size = 32, # batch size for gradient accumulation
     gradient_checkpointing = True,
+    max_seq_length = 1024,
     num_train_epochs = 3, # we do 3 pasess over the dataset.
     freeze_embed = True,
     use_lora = False,
@@ -48,7 +49,7 @@ def get_train_args(config, output_dir = "./output/"):
     training_args = TrainingArguments(
         output_dir=output_dir,
         per_device_train_batch_size=config.batch_size,
-        per_device_eval_batch_size=config.batch_size//4,
+        per_device_eval_batch_size=max(config.batch_size//2, 1),
         bf16=True,
         learning_rate=config.lr,
         lr_scheduler_type="cosine",
@@ -115,7 +116,7 @@ def main(config):
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         packing=True,
-        max_seq_length=1024,
+        max_seq_length=config.max_seq_length,
         args=training_args,
         formatting_func=create_alpaca_prompt_with_response,
     )
@@ -125,7 +126,7 @@ def main(config):
     if config.train: 
         trainer.train()
     if config.evaluate:    
-        def _map_func(row): return {"text": create_alpaca_prompt(row)}
+        _map_func = lambda row: {"text": create_alpaca_prompt(row)}
         test_dataset = eval_dataset.map(_map_func) # no answers
         wandb_callback = LLMSampleCB(trainer, test_dataset, num_samples=10, max_new_tokens=256)
         trainer.add_callback(wandb_callback)
