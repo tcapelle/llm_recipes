@@ -12,3 +12,11 @@ parameters:
     values: ['True', 'False']
   use_lora:
     values: ['True', 'False']
+  batch_size:
+    values: [1,2,4,8,16,32]
+  max_seq_len:
+    values: [512, 1024]
+  max_steps:
+    value: 100
+  evaluate:
+    value: False
