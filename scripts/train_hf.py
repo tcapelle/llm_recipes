@@ -30,11 +30,14 @@ config = SimpleNamespace(
     freeze_embed = True,
     use_lora = False,
     lr = 2e-5,
+    save_model=True, # save model after training also save to wandb
     # for debug purposes
     max_steps=-1, 
     train=True,
     evaluate=True,
     debug_data=False,
+    load_in_4bit=False,
+    load_in_8bit=False,
 )
 
 def get_alpaca_ds(dataset_at):
@@ -48,6 +51,7 @@ def get_alpaca_ds(dataset_at):
 def get_train_args(config, output_dir = "./output/"):
     training_args = TrainingArguments(
         output_dir=output_dir,
+        report_to="wandb",
         per_device_train_batch_size=config.batch_size,
         per_device_eval_batch_size=max(config.batch_size//2, 1),
         bf16=True,
@@ -55,11 +59,10 @@ def get_train_args(config, output_dir = "./output/"):
         lr_scheduler_type="cosine",
         warmup_ratio=0.1,
         max_steps=config.max_steps,
+        num_train_epochs=config.num_train_epochs,
         gradient_accumulation_steps=config.gradient_accumulation_steps,
         gradient_checkpointing=config.gradient_checkpointing,
         gradient_checkpointing_kwargs={"use_reentrant": False},
-        # evaluation_strategy="steps",
-        # eval_steps=config.eval_steps,
         evaluation_strategy="no",
         # logging strategies
         logging_strategy="steps",
@@ -71,11 +74,6 @@ def get_train_args(config, output_dir = "./output/"):
 def main(config):
     # some sane defaults computations
     config.gradient_accumulation_steps = (1024 // config.max_seq_length) * config.effective_batch_size // config.batch_size
-    if config.max_steps == -1:
-        config.max_steps = config.num_train_epochs * ALPACA_TOTAL_PACKED_SAMPLES // (config.batch_size * config.gradient_accumulation_steps)
-    config.eval_steps = config.max_steps // config.num_train_epochs
-    if config.debug_data: 
-        config.max_steps = -1
     config.tokens_per_step = config.max_seq_length * config.batch_size * config.gradient_accumulation_steps
     print(f"\nWe are training for {config.max_steps} steps with an effective batch size of {config.effective_batch_size} and a gradient accumulation of {config.gradient_accumulation_steps} steps.")
     print(f"Tokens per step max_seq_len * bs * grad_accum_steps: {config.tokens_per_step}\n")
@@ -87,6 +85,8 @@ def main(config):
         low_cpu_mem_usage=True,
         torch_dtype=torch.bfloat16,
         use_cache=False,
+        load_in_4bit=(not config.load_in_8bit) and config.load_in_4bit,
+        load_in_8bit=(not config.load_in_4bit) and config.load_in_8bit,
     )
     if config.use_lora:
         peft_config = LoraConfig(
@@ -128,6 +128,16 @@ def main(config):
         return
     if config.train: 
         trainer.train()
+        if config.save_model:
+            trainer.save_model(training_args.output_dir)
+            print("Saving model as artifact to wandb")
+            model_at = wandb.Artifact(
+                name = f"{wandb.run.id}_alpaca", 
+                type="model",
+                description="Model trained on Alpaca GPT4 dataset",
+                metadata={"finetuned_from":config.model_id})
+            model_at.add_dir(training_args.output_dir)
+            wandb.log_artifact(model_at)
     if config.evaluate:    
         _map_func = lambda row: {"text": create_alpaca_prompt(row)}
         test_dataset = eval_dataset.map(_map_func) # no answers
