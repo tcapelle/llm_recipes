@@ -5,3 +5,4 @@ artifacts/
 *cache*
 *checkpoint*
 *tfevent*
+/**/*/eval_harness_output
