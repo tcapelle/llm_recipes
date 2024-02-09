@@ -14,14 +14,15 @@ class LaunchOverride(simple_parsing.Serializable):
     model_path: str = "mistralai/Mistral-7B-v0.1" # The path to the model 
     model_args: str = "dtype=\"bfloat16\"" # The model arguments
     tasks: str = "arc_easy" # The tasks to run, comma separated
+    log_samples: bool = False # Whether to log samples
     device: str = "cuda:0" # The device to use
     batch_size: int = 1 # The batch size to use, can affect results
     output_path: str = "./output/mistral7b" # The path to save the output to
-    log: bool =  True # Whether to log the output to wandb
+    wandb_args: str = f"project={WANDB_PROJECT},entity={WANDB_ENTITY}" # The arguments passed to wandb.init, comma separated
 
 def exec(cmd):
     env = os.environ.copy()
-    conda_pre_cmd = f"{sys.executable} -m"  # trick to make pick up the right python
+    conda_pre_cmd = f"{sys.executable} -m "  # trick to make pick up the right python
     cmd = conda_pre_cmd + cmd
     logging.info(f"\nRunning: {cmd}\n")
     result = subprocess.run(cmd, text=True, shell=True, env=env)
@@ -31,7 +32,9 @@ def exec(cmd):
 def maybe_from_artifact(model_at_address: str):
     "Download the model from wandb if it's an artifact, otherwise return the path."
     try:
-        model_dir = wandb.use_artifact(model_at_address).download()
+        api = wandb.Api()
+        model_dir = api.artifact(model_at_address).download()
+        # model_dir = wandb.use_artifact().download()
         logging.info(f"Downloading model from wandb: {model_at_address}")
         return model_dir
     except:
@@ -40,19 +43,18 @@ def maybe_from_artifact(model_at_address: str):
 
 
 def lm_eval(**kwargs):
-    kwargs.pop("log")
     model_path = maybe_from_artifact(kwargs.pop("model_path"))
     model_args = f"pretrained={model_path}" + "," + kwargs.pop("model_args")
+    wandb_args = kwargs.pop("wandb_args")
+    log_samples = kwargs.pop("log_samples")
     cmd = (
         "lm_eval --model hf "
-        f"--model_args {model_args} ")
+        f"--model_args {model_args} "
+        f"--wandb_args {wandb_args} "
+        f"--log_samples " if log_samples else ""
+    )
     cmd += " ".join([f"--{k} {v}" for k, v in kwargs.items()])
     exec(cmd)
-
-def load_json(file):
-    with open(file) as f:
-        data = json.load(f)
-    return data
 
 def leftover_args_to_dict(leftover_args):
     "Convert leftover args to a dictionary."
@@ -64,21 +66,6 @@ if __name__ == "__main__":
         leftover_args = {}
     else:
         leftover_args = leftover_args_to_dict(leftover_args)
-    if args.log:
-        wandb.init(project=WANDB_PROJECT, entity=WANDB_ENTITY, config={**args.to_dict(), **leftover_args})
-        args = wandb.config
-        lm_eval(**args)
-    else:
-        print(args)
-        lm_eval(**args.to_dict(), **leftover_args)
-
-    output = load_json(f"{args.output_path}/results.json")
-    results = output["results"]
-    print(results)
-
-    if wandb.run:
-        wandb.log(results)
-        artifact = wandb.Artifact(name="eval_harness_outputs", 
-                                  type="evals")
-        artifact.add_dir(args.output_path)
-        wandb.log_artifact(artifact)
+    
+    logging.info(f"Using arguments: {args}")
+    lm_eval(**args.to_dict(), **leftover_args)
