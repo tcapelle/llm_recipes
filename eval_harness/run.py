@@ -18,7 +18,10 @@ class LaunchOverride(simple_parsing.Serializable):
     device: str = "cuda:0" # The device to use
     batch_size: int = 1 # The batch size to use, can affect results
     output_path: str = "./output/mistral7b" # The path to save the output to
-    wandb_args: str = f"project={WANDB_PROJECT},entity={WANDB_ENTITY}" # The arguments passed to wandb.init, comma separated
+    wandb_args: str = f"project={WANDB_PROJECT},entity={WANDB_ENTITY},job_type=lm_eval" # The arguments passed to wandb.init, comma separated
+
+    def __post_init__(self):
+        self.wandb_args = self.wandb_args + f",tags={self.tasks.split(',')}"
 
 def exec(cmd):
     env = os.environ.copy()
