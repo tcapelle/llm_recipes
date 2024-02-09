@@ -17,7 +17,7 @@ class LaunchOverride(simple_parsing.Serializable):
     device: str = "cuda:0" # The device to use
     batch_size: int = 1 # The batch size to use, can affect results
     output_path: str = "./output/mistral7b" # The path to save the output to
-    log: bool =  True # Whether to log the output to wandb
+    wandb_args: str = f"project={WANDB_PROJECT},entity={WANDB_ENTITY}" # The arguments passed to wandb.init, comma separated
 
 def exec(cmd):
     env = os.environ.copy()
@@ -40,12 +40,14 @@ def maybe_from_artifact(model_at_address: str):
 
 
 def lm_eval(**kwargs):
-    kwargs.pop("log")
     model_path = maybe_from_artifact(kwargs.pop("model_path"))
     model_args = f"pretrained={model_path}" + "," + kwargs.pop("model_args")
+    wandb_args = kwargs.pop("wandb_args")
     cmd = (
         "lm_eval --model hf "
-        f"--model_args {model_args} ")
+        f"--model_args {model_args} "
+        f"--wandb_args {wandb_args} "
+    )
     cmd += " ".join([f"--{k} {v}" for k, v in kwargs.items()])
     exec(cmd)
 
@@ -64,21 +66,6 @@ if __name__ == "__main__":
         leftover_args = {}
     else:
         leftover_args = leftover_args_to_dict(leftover_args)
-    if args.log:
-        wandb.init(project=WANDB_PROJECT, entity=WANDB_ENTITY, config={**args.to_dict(), **leftover_args})
-        args = wandb.config
-        lm_eval(**args)
-    else:
-        print(args)
-        lm_eval(**args.to_dict(), **leftover_args)
-
-    output = load_json(f"{args.output_path}/results.json")
-    results = output["results"]
-    print(results)
-
-    if wandb.run:
-        wandb.log(results)
-        artifact = wandb.Artifact(name="eval_harness_outputs", 
-                                  type="evals")
-        artifact.add_dir(args.output_path)
-        wandb.log_artifact(artifact)
+    
+    logging.info(f"Using arguments: {args}")
+    lm_eval(**args.to_dict(), **leftover_args)
