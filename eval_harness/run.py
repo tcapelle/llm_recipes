@@ -56,11 +56,6 @@ def lm_eval(**kwargs):
     cmd += " ".join([f"--{k} {v}" for k, v in kwargs.items()])
     exec(cmd)
 
-def load_json(file):
-    with open(file) as f:
-        data = json.load(f)
-    return data
-
 def leftover_args_to_dict(leftover_args):
     "Convert leftover args to a dictionary."
     return {k[2:]: v for k, v in zip(leftover_args[::2], leftover_args[1::2])}
