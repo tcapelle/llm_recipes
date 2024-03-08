@@ -1,0 +1,70 @@
+base_model: mistralai/Mistral-7B-v0.1
+model_type: AutoModelForCausalLM
+tokenizer_type: LlamaTokenizer
+trust_remote_code: true
+
+load_in_8bit: false
+load_in_4bit: false
+strict: false
+
+datasets:
+  - path: HuggingFaceH4/deita-10k-v0-sft
+    type: sharegpt
+    conversation: chatml
+dataset_prepared_path: last_run_prepared
+val_set_size: 0.005
+save_total_limit: 1
+dataloader_num_workers: 8
+dataloader_prefetch_factor: 4
+dataloader_pin_memory: true
+
+output_dir: /zephyr_sft
+
+
+sequence_len: 2048
+sample_packing: true
+pad_to_sequence_len: true
+
+wandb_project: mistral_zephyr_v2
+wandb_entity: llm_surgery
+wandb_watch:
+wandb_name: mistral_zephyr_axolotl
+wandb_log_model:
+
+gradient_accumulation_steps: 1
+micro_batch_size: 8
+num_epochs: 3
+optimizer: adamw
+lr_scheduler: cosine
+learning_rate: 0.00002
+adam_beta1: 0.9
+adam_beta2: 0.99
+adam_epsilon: 0.00001
+max_grad_norm: 1.0
+
+train_on_inputs: false
+group_by_length: false
+bf16: true
+fp16: false
+tf32: true
+
+gradient_checkpointing: true
+early_stopping_patience:
+resume_from_checkpoint:
+local_rank:
+logging_steps: 1
+xformers_attention:
+flash_attention: true
+
+warmup_steps: 100
+eval_steps: 0.05
+save_steps: 0.25
+debug:
+deepspeed:
+weight_decay: 0.1
+fsdp:
+fsdp_config:
+special_tokens:
+  eos_token: "<|im_end|>"
+tokens:
+  - "<|im_start|>"
