@@ -1,4 +1,6 @@
-# !accelerate launch -m axolotl.cli.train /zephyr/zephyr.yml --deepspeed deepspeed_configs/zero3_bf16.json
+# need to run with docker with: 
+# drun -v ~/llm_recipes/zephyr:/workspace/axolotl/zephyr winglian/axolotl:main-latest
+# accelerate launch -m axolotl.cli.train zephyr/axolotl.yml --deepspeed deepspeed_configs/zero3_bf16.json
 base_model: mistralai/Mistral-7B-v0.1
 model_type: AutoModelForCausalLM
 tokenizer_type: LlamaTokenizer
@@ -20,8 +22,6 @@ dataloader_prefetch_factor: 4
 dataloader_pin_memory: true
 
 output_dir: /zephyr_sft
-
-
 sequence_len: 2048
 sample_packing: true
 pad_to_sequence_len: true
@@ -35,7 +35,7 @@ wandb_log_model:
 gradient_accumulation_steps: 1
 micro_batch_size: 8
 num_epochs: 3
-optimizer: adamw
+optimizer: adamw_hf
 lr_scheduler: cosine
 learning_rate: 0.00002
 adam_beta1: 0.9
