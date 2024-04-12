@@ -5,10 +5,11 @@ WORKDIR /workspace/eval_harness
 RUN git config --global --add safe.directory /workspace/eval_harness
 
 # Install Eval harness
-RUN python -m pip install "lm_eval[wandb] @ git+https://github.com/ayulockin/lm-evaluation-harness@wandb-logging"
+RUN python -m pip install "lm_eval[wandb] @ git+https://github.com/EleutherAI/lm-evaluation-harness@main"
 
-# install other requirements
+# install other requirement
 COPY . /workspace/eval_harness
+
 
 RUN python -m pip install -r requirements.txt
 
