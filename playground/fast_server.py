@@ -11,8 +11,7 @@ from limits.strategies import FixedWindowRateLimiter
 from limits import RateLimitItemPerMinute
 
 WEAVE_PROJECT = "prompt-eng/llama_405b_interceptor"
-LLAMA_IP_ADDRESS = os.getenv("LLAMA_IP_ADDRESS")
-
+LLAMA_IP_ADDRESS = os.environ.get("LLAMA_IP_ADDRESS")
 weave.init(WEAVE_PROJECT)
 
 prompt_guard_model = PromptGuard()
@@ -60,6 +59,7 @@ def maybe_call_model(data):
 
     @weave.op
     def call_llama(messages):
+        print("Calling Llama 405B")
         completion = llama_client.chat.completions.create(
         model="meta-llama/Meta-Llama-3.1-405B-Instruct-FP8",
         messages=messages,
