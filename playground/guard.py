@@ -1,3 +1,4 @@
+import re
 import torch
 import weave
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
@@ -28,4 +29,8 @@ class LlamaGuard(weave.Model):
         input_ids = self._tokenizer.apply_chat_template(chat, return_tensors="pt").to(self._model.device)
         output = self._model.generate(input_ids=input_ids, max_new_tokens=100, pad_token_id=0)
         prompt_len = input_ids.shape[-1]
-        return self._tokenizer.decode(output[0][prompt_len:], skip_special_tokens=True)
+        llama_guard_out = self._tokenizer.decode(output[0][prompt_len:], skip_special_tokens=True)
+        # Extract the error number from llama_guard_out
+        error_match = re.search(r'S(\d+)', llama_guard_out)
+        error_number = error_match.group(0) if error_match else 0
+        return {"safe": "unsafe" not in llama_guard_out, "categories": error_number}

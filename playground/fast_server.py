@@ -2,6 +2,7 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 import uvicorn
 import json
+import re
 import os
 from openai import OpenAI
 import weave
@@ -9,6 +10,7 @@ from guard import PromptGuard, LlamaGuard
 from limits import storage
 from limits.strategies import FixedWindowRateLimiter
 from limits import RateLimitItemPerMinute
+import logging
 
 WEAVE_PROJECT = "prompt-eng/llama_405b_interceptor"
 LLAMA_IP_ADDRESS = os.environ.get("LLAMA_IP_ADDRESS")
@@ -18,6 +20,11 @@ prompt_guard_model = PromptGuard()
 llama_guard_model = LlamaGuard()
 
 app = FastAPI()
+
+# Set up logging
+# logger = logging.getLogger(__name__)
+logger = logging.getLogger('uvicorn.error')
+logging.basicConfig(level=logging.INFO)
 
 # Set up rate limiter
 mem_storage = storage.MemoryStorage()
@@ -58,7 +65,7 @@ async def rate_limit_middleware(request: Request, call_next):
     return response
 
 @weave.op
-def maybe_call_model(data):
+def maybe_call_model(data, client_ip):
     # call OPenai
     llama_client = OpenAI(
         base_url=f"http://{LLAMA_IP_ADDRESS}/v1",  # the endpoint IP running on vLLM
@@ -67,7 +74,7 @@ def maybe_call_model(data):
 
     @weave.op
     def call_llama(messages):
-        print("Calling Llama 405B")
+        logger.info("Calling Llama 405B")
         completion = llama_client.chat.completions.create(
         model="meta-llama/Meta-Llama-3.1-405B-Instruct-FP8",
         messages=messages,
@@ -78,8 +85,10 @@ def maybe_call_model(data):
 
     prompt_guard_out = prompt_guard_model.predict(messages)
     llama_guard_out = llama_guard_model.predict(messages)
-    print(f"Guard output: {prompt_guard_out}")
-    print(f"Llama Guard output: {llama_guard_out}")
+
+    logger.info(f"Guard output: {prompt_guard_out}")
+    logger.info(f"Llama Guard output: {llama_guard_out}")
+    logger.info(f"Client IP: {client_ip}")
 
     # if "unsafe" in llama_guard_out:
     response = call_llama(messages).dict()
@@ -123,13 +132,17 @@ async def intercept_openai(request: Request, path: str):
         data = {}
     
     # Log the intercepted request
-    print(f"Intercepted OpenAI API call to /{path}")
-    print(f"Request body: {data}")
+    logger.info(f"Intercepted OpenAI API call to /{path}")
+    prompt = data['messages'][0]["content"]
+    logger.info(f"Request prompt: {prompt}")
+    
+    # Get the IP of the caller
+    client_ip = request.client.host
     
     # Here you can add your custom logic, e.g., modifying the request,
     # forwarding it to OpenAI, or returning a mock response
     
-    model_out = maybe_call_model(data)
+    model_out = maybe_call_model(data, client_ip)
     return model_out
 
 if __name__ == "__main__":
