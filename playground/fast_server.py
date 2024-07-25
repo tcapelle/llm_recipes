@@ -90,34 +90,8 @@ def maybe_call_model(data, client_ip):
     logger.info(f"Llama Guard output: {llama_guard_out}")
     logger.info(f"Client IP: {client_ip}")
 
-    # if "unsafe" in llama_guard_out:
     response = call_llama(messages).dict()
-    return JSONResponse(content=response)
-
-    # else:
-    #     mock_response = {
-    #         "choices": [
-    #             {
-    #                 "finish_reason": "stop",
-    #                 "index": 0,
-    #                 "message": {
-    #                     "content": "You are not playing the game correctly, please try breaking LLama3.1.",
-    #                     "role": "assistant"
-    #                 },
-    #                 "logprobs": None
-    #             }
-    #         ],
-    #         "created": 1620000000,
-    #         "id": "chatcmpl-mockid123456",
-    #         "model": "LLama-3.1-405B-Instruct-FP8",
-    #         "object": "chat.completion",
-    #         "usage": {
-    #             "completion_tokens": 13,
-    #             "prompt_tokens": 0,
-    #             "total_tokens": 13
-    #         }
-    #     }
-    #     return JSONResponse(content=mock_response)
+    return response
 
 
 @app.post("/v1/{path:path}")
@@ -143,7 +117,7 @@ async def intercept_openai(request: Request, path: str):
     # forwarding it to OpenAI, or returning a mock response
     
     model_out = maybe_call_model(data, client_ip)
-    return model_out
+    return JSONResponse(content=model_out)
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

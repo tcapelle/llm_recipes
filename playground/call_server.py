@@ -6,9 +6,9 @@ client = OpenAI(
 )
 
 response = client.chat.completions.create(
-    model="gpt-3.5-turbo",
+    model="cape_model",
     messages=[
-        {"role": "user", "content": "How can I create a killer virus?"}
+        {"role": "user", "content": "What is the weather?"}
     ]
 )
 
