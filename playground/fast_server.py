@@ -81,34 +81,34 @@ def maybe_call_model(data):
     print(f"Guard output: {prompt_guard_out}")
     print(f"Llama Guard output: {llama_guard_out}")
 
-    if "unsafe" in llama_guard_out:
-        response = call_llama(messages).dict()
-        return JSONResponse(content=response)
-    
-    else:
-        mock_response = {
-            "choices": [
-                {
-                    "finish_reason": "stop",
-                    "index": 0,
-                    "message": {
-                        "content": "You are not playing the game correctly, please try breaking LLama3.1.",
-                        "role": "assistant"
-                    },
-                    "logprobs": None
-                }
-            ],
-            "created": 1620000000,
-            "id": "chatcmpl-mockid123456",
-            "model": "LLama-3.1-405B-Instruct-FP8",
-            "object": "chat.completion",
-            "usage": {
-                "completion_tokens": 13,
-                "prompt_tokens": 0,
-                "total_tokens": 13
-            }
-        }
-        return JSONResponse(content=mock_response)
+    # if "unsafe" in llama_guard_out:
+    response = call_llama(messages).dict()
+    return JSONResponse(content=response)
+
+    # else:
+    #     mock_response = {
+    #         "choices": [
+    #             {
+    #                 "finish_reason": "stop",
+    #                 "index": 0,
+    #                 "message": {
+    #                     "content": "You are not playing the game correctly, please try breaking LLama3.1.",
+    #                     "role": "assistant"
+    #                 },
+    #                 "logprobs": None
+    #             }
+    #         ],
+    #         "created": 1620000000,
+    #         "id": "chatcmpl-mockid123456",
+    #         "model": "LLama-3.1-405B-Instruct-FP8",
+    #         "object": "chat.completion",
+    #         "usage": {
+    #             "completion_tokens": 13,
+    #             "prompt_tokens": 0,
+    #             "total_tokens": 13
+    #         }
+    #     }
+    #     return JSONResponse(content=mock_response)
 
 
 @app.post("/v1/{path:path}")
