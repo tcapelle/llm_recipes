@@ -82,9 +82,13 @@ def maybe_call_model(data, client_ip):
         return completion
     
     messages = data.get("messages", [])
-
-    prompt_guard_out = prompt_guard_model.predict(messages)
-    llama_guard_out = llama_guard_model.predict(messages)
+    try:
+        prompt_guard_out = prompt_guard_model.predict(messages)
+        llama_guard_out = llama_guard_model.predict(messages)
+    except Exception as e:
+        logger.error(f"Error in guard models: {str(e)}")
+        prompt_guard_out = None
+        llama_guard_out = None
 
     logger.info(f"Guard output: {prompt_guard_out}")
     logger.info(f"Llama Guard output: {llama_guard_out}")
