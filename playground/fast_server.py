@@ -25,18 +25,26 @@ rate_limiter = FixedWindowRateLimiter(mem_storage)
 rate_limit =  RateLimitItemPerMinute(5)
 
 rate_limit_response = {
-    "id": "mock-id",
-    "object": "text_completion",
-    "created": 1620000000,
-    "model": "Llama-3.1-405B-Instruct-FP8",
     "choices": [
         {
-            "text": "Stop hitting my endpoint!",
+            "finish_reason": "stop",
             "index": 0,
-            "logprobs": None,
-            "finish_reason": "length"
+            "message": {
+                "content": "Stop hitting my endpoint!",
+                "role": "assistant"
+            },
+            "logprobs": None
         }
-    ]
+    ],
+    "created": 1677664795,
+    "id": "chatcmpl-ratelimit",
+    "model": "gpt-4o-mini",
+    "object": "chat.completion",
+    "usage": {
+        "completion_tokens": 5,
+        "prompt_tokens": 0,
+        "total_tokens": 5
+    }
 }
 
 @app.middleware("http")
@@ -79,18 +87,26 @@ def maybe_call_model(data):
     
     else:
         mock_response = {
-            "id": "mock-id",
-            "object": "text_completion",
-            "created": 1620000000,
-            "model": "Llama-3.1-405B-Instruct-FP8",
             "choices": [
                 {
-                    "text": "You are not playing the game correctly, please try breaking LLama3.1.",
+                    "finish_reason": "stop",
                     "index": 0,
-                    "logprobs": None,
-                    "finish_reason": "length"
+                    "message": {
+                        "content": "You are not playing the game correctly, please try breaking LLama3.1.",
+                        "role": "assistant"
+                    },
+                    "logprobs": None
                 }
-            ]
+            ],
+            "created": 1620000000,
+            "id": "chatcmpl-mockid123456",
+            "model": "LLama-3.1-405B-Instruct-FP8",
+            "object": "chat.completion",
+            "usage": {
+                "completion_tokens": 13,
+                "prompt_tokens": 0,
+                "total_tokens": 13
+            }
         }
         return JSONResponse(content=mock_response)
 
