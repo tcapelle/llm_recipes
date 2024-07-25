@@ -38,7 +38,7 @@ rate_limit_response = {
     ],
     "created": 1677664795,
     "id": "chatcmpl-ratelimit",
-    "model": "gpt-4o-mini",
+    "model": "LLama-3.1-405B-Instruct-FP8",
     "object": "chat.completion",
     "usage": {
         "completion_tokens": 5,
