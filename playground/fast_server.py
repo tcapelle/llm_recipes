@@ -1,10 +1,11 @@
+import asyncio
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 import uvicorn
 import json
 import re
 import os
-from openai import OpenAI
+from openai import AsyncOpenAI
 import weave
 from guard import PromptGuard, LlamaGuard
 from limits import storage
@@ -65,37 +66,39 @@ async def rate_limit_middleware(request: Request, call_next):
     return response
 
 @weave.op
-def maybe_call_model(data, client_ip):
+async def maybe_call_model(data, client_ip):
     # call OPenai
-    llama_client = OpenAI(
+    llama_client = AsyncOpenAI(
         base_url=f"http://{LLAMA_IP_ADDRESS}/v1",  # the endpoint IP running on vLLM
         api_key="dummy_api_key",  # the endpoint API key
     )
 
     @weave.op
-    def call_llama(messages):
+    async def call_llama(messages):
         logger.info("Calling Llama 405B")
-        completion = llama_client.chat.completions.create(
-        model="meta-llama/Meta-Llama-3.1-405B-Instruct-FP8",
-        messages=messages,
+        completion = await llama_client.chat.completions.create(
+            model="meta-llama/Meta-Llama-3.1-405B-Instruct-FP8",
+            messages=messages,
         )
         return completion
     
     messages = data.get("messages", [])
-    try:
-        prompt_guard_out = prompt_guard_model.predict(messages)
-        llama_guard_out = llama_guard_model.predict(messages)
-    except Exception as e:
-        logger.error(f"Error in guard models: {str(e)}")
-        prompt_guard_out = None
-        llama_guard_out = None
+
+    # call 3 models in parallel
+    prompt_guard_out, llama_guard_out, response = await asyncio.gather(
+        prompt_guard_model.predict(messages), 
+        llama_guard_model.predict(messages),
+        call_llama(messages)
+    )
+
+    # prompt_guard_out = await prompt_guard_model.predict(messages)
+    # llama_guard_out = await llama_guard_model.predict(messages)
+    # response = await call_llama(messages)
 
     logger.info(f"Guard output: {prompt_guard_out}")
     logger.info(f"Llama Guard output: {llama_guard_out}")
     logger.info(f"Client IP: {client_ip}")
-
-    response = call_llama(messages).dict()
-    return response
+    return response.dict()
 
 
 @app.post("/v1/{path:path}")
@@ -120,7 +123,7 @@ async def intercept_openai(request: Request, path: str):
     # Here you can add your custom logic, e.g., modifying the request,
     # forwarding it to OpenAI, or returning a mock response
     
-    model_out = maybe_call_model(data, client_ip)
+    model_out = await maybe_call_model(data, client_ip)
     return JSONResponse(content=model_out)
 
 if __name__ == "__main__":
