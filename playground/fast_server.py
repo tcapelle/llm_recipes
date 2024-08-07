@@ -66,7 +66,7 @@ async def rate_limit_middleware(request: Request, call_next):
     return response
 
 @weave.op
-async def maybe_call_model(data, client_ip):
+async def call_models(data):
     # call OPenai
     llama_client = AsyncOpenAI(
         base_url=f"http://{LLAMA_IP_ADDRESS}/v1",  # the endpoint IP running on vLLM
@@ -88,16 +88,10 @@ async def maybe_call_model(data, client_ip):
     prompt_guard_out, llama_guard_out, response = await asyncio.gather(
         prompt_guard_model.predict(messages), 
         llama_guard_model.predict(messages),
-        call_llama(messages)
-    )
-
-    # prompt_guard_out = await prompt_guard_model.predict(messages)
-    # llama_guard_out = await llama_guard_model.predict(messages)
-    # response = await call_llama(messages)
+        call_llama(messages))
 
     logger.info(f"Guard output: {prompt_guard_out}")
     logger.info(f"Llama Guard output: {llama_guard_out}")
-    logger.info(f"Client IP: {client_ip}")
     return response.dict()
 
 
@@ -117,13 +111,10 @@ async def intercept_openai(request: Request, path: str):
     prompt = data['messages'][0]["content"]
     logger.info(f"Request prompt: {prompt}")
     
-    # Get the IP of the caller
-    client_ip = request.client.host
-    
     # Here you can add your custom logic, e.g., modifying the request,
     # forwarding it to OpenAI, or returning a mock response
     
-    model_out = await maybe_call_model(data, client_ip)
+    model_out = await call_models(data)
     return JSONResponse(content=model_out)
 
 if __name__ == "__main__":
