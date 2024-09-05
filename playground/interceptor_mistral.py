@@ -70,7 +70,9 @@ async def forward_request(request: Request, path: str):
             "Accept": "application/json",
             "Authorization": f"Bearer {config.mistral_api_key}"
         }
-        
+            # Log the full request details before sending
+        print(f"Headers: {json.dumps(headers, indent=4)}")
+        print(f"Data: {json.dumps(data, indent=4)}")
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 "https://api.mistral.ai/v1/chat/completions",
