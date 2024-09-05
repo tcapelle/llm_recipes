@@ -29,9 +29,14 @@ rate_limit_response = {
     }
 }
 
-model_client = AsyncOpenAI(
-    base_url=config.model_api_endpoint,
-    api_key=config.model_api_key,
+model_client1 = AsyncOpenAI(
+    base_url=config.model_api_endpoint1,
+    api_key=config.model_api_key1,
+)
+
+model_client2 = AsyncOpenAI(
+    base_url=config.model_api_endpoint2,
+    api_key=config.model_api_key2,
 )
 
 @app.middleware("http")
@@ -53,13 +58,20 @@ async def forward_request(request: Request, path: str):
     except json.JSONDecodeError:
         return JSONResponse(status_code=400, content={"error": "Invalid JSON"})
     
-    # Log the intercepted request
-    logger.info(f"Forwarding request to /{path}")
+
     
     # Forward the request to the model
     try:
-        data['model'] = config.model_name  # Set the model name from config
-        response = await model_client.chat.completions.create(**data)
+        model = data['model']
+        if model == config.model_name1:
+            # Log the intercepted request
+            logger.info(f"Forwarding request to model {model}")
+            response = await model_client1.chat.completions.create(**data)
+        elif model == config.model_name2:
+            logger.info(f"Forwarding request to model {model}")
+            response = await model_client2.chat.completions.create(**data)
+        else:
+            return JSONResponse(status_code=400, content={"error": "Invalid model"})
         return JSONResponse(content=response.dict())
     except Exception as e:
         logger.error(f"Error calling model: {str(e)}")
