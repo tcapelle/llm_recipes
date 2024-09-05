@@ -4,6 +4,7 @@ import uvicorn
 import json
 import httpx
 import logging
+import time
 import os
 from dataclasses import dataclass
 
@@ -22,6 +23,7 @@ class Config:
     mistral_api_endpoint: str = "https://api.mistral.ai/v1/chat/completions"
     mistral_api_key: str = os.getenv("MISTRAL_API_KEY")
     timeout: int = 30
+    sleep: int = 5
     server_host: str = "0.0.0.0"
     server_port: int = 8000
     log_level: str = "INFO"
@@ -89,7 +91,7 @@ async def forward_request(request: Request, path: str):
                 headers=headers,
                 timeout=config.timeout,
             )
-        
+            time.sleep(config.sleep)
         logger.info(f"Forwarding request to Mistral API")
         return JSONResponse(content=response.json(), status_code=response.status_code)
     except Exception as e:
