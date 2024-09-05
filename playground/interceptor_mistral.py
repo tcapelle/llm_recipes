@@ -19,6 +19,7 @@ class Config:
     rate_limit_error_message: str = "Rate limit exceeded. Please try again later."
     mistral_api_endpoint: str = "https://api.mistral.ai/v1/chat/completions"
     mistral_api_key: str = os.getenv("MISTRAL_API_KEY")
+    request_timeout: int = 20
     server_host: str = "0.0.0.0"
     server_port: int = 8000
     log_level: str = "INFO"
@@ -56,6 +57,10 @@ async def rate_limit_middleware(request: Request, call_next):
 async def forward_request(request: Request, path: str):
     # Get the request body
     body = await request.body()
+
+    headers = request.headers
+    # headers["authorization"] = f"Bearer {config.mistral_api_key}"
+    print(f"Headers: {headers}")
     
     # Parse the JSON body
     try:
@@ -70,14 +75,17 @@ async def forward_request(request: Request, path: str):
             "Accept": "application/json",
             "Authorization": f"Bearer {config.mistral_api_key}"
         }
-            # Log the full request details before sending
+        # Log the full request details before sending
         print(f"Headers: {json.dumps(headers, indent=4)}")
-        print(f"Data: {json.dumps(data, indent=4)}")
+        json_data = json.dumps(data, ensure_ascii=False, indent=4)
+        print(f"Data being sent: {json_data}")
+
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 "https://api.mistral.ai/v1/chat/completions",
-                json=data,
-                headers=headers
+                data=json_data,
+                headers=headers,
+                timeout=config.request_timeout,
             )
         
         logger.info(f"Forwarding request to Mistral API")
