@@ -19,7 +19,7 @@ class Config:
     rate_limit_error_message: str = "Rate limit exceeded. Please try again later."
     mistral_api_endpoint: str = "https://api.mistral.ai/v1/chat/completions"
     mistral_api_key: str = os.getenv("MISTRAL_API_KEY")
-    request_timeout: int = 20
+    request_timeout: int = 30
     server_host: str = "0.0.0.0"
     server_port: int = 8000
     log_level: str = "INFO"
