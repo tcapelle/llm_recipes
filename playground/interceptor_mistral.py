@@ -11,6 +11,8 @@ from limits import storage
 from limits.strategies import FixedWindowRateLimiter
 from limits import RateLimitItemPerMinute
 
+import simple_parsing
+
 app = FastAPI()
 
 @dataclass
@@ -19,12 +21,12 @@ class Config:
     rate_limit_error_message: str = "Rate limit exceeded. Please try again later."
     mistral_api_endpoint: str = "https://api.mistral.ai/v1/chat/completions"
     mistral_api_key: str = os.getenv("MISTRAL_API_KEY")
-    request_timeout: int = 30
+    timeout: int = 30
     server_host: str = "0.0.0.0"
     server_port: int = 8000
     log_level: str = "INFO"
 
-config = Config()
+config = simple_parsing.parse(Config)
 
 
 # Set up logging
@@ -85,7 +87,7 @@ async def forward_request(request: Request, path: str):
                 "https://api.mistral.ai/v1/chat/completions",
                 data=json_data,
                 headers=headers,
-                timeout=config.request_timeout,
+                timeout=config.timeout,
             )
         
         logger.info(f"Forwarding request to Mistral API")
