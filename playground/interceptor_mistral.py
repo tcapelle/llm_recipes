@@ -23,7 +23,7 @@ class Config:
     mistral_api_endpoint: str = "https://api.mistral.ai/v1/chat/completions"
     mistral_api_key: str = os.getenv("MISTRAL_API_KEY")
     timeout: int = 30
-    max_concurrent_requests: int = 5  # New parameter for semaphore
+    max_concurrent_requests: int = 20  # New parameter for semaphore
     server_host: str = "0.0.0.0"
     server_port: int = 8000
     log_level: str = "INFO"
