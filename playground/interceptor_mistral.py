@@ -1,10 +1,10 @@
+import asyncio
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 import uvicorn
 import json
 import httpx
 import logging
-import time
 import os
 from dataclasses import dataclass
 
@@ -23,13 +23,12 @@ class Config:
     mistral_api_endpoint: str = "https://api.mistral.ai/v1/chat/completions"
     mistral_api_key: str = os.getenv("MISTRAL_API_KEY")
     timeout: int = 30
-    sleep: int = 5
+    max_concurrent_requests: int = 5  # New parameter for semaphore
     server_host: str = "0.0.0.0"
     server_port: int = 8000
     log_level: str = "INFO"
 
 config = simple_parsing.parse(Config)
-
 
 # Set up logging
 logger = logging.getLogger('uvicorn.error')
@@ -48,6 +47,9 @@ rate_limit_response = {
         "code": "rate_limit_exceeded"
     }
 }
+
+# Create a semaphore to limit concurrent requests
+semaphore = asyncio.Semaphore(config.max_concurrent_requests)
 
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
@@ -84,17 +86,17 @@ async def forward_request(request: Request, path: str):
         json_data = json.dumps(data, ensure_ascii=False, indent=4)
         print(f"Data being sent: {json_data}")
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                "https://api.mistral.ai/v1/chat/completions",
-                data=json_data,
-                headers=headers,
-                timeout=config.timeout,
-            )
-            time.sleep(config.sleep)
-            print(f"Response: {json.dumps(response.json(), indent=4)}")
-        logger.info(f"Forwarding request to Mistral API")
-        return JSONResponse(content=response.json(), status_code=response.status_code)
+        async with semaphore:  # Use semaphore to limit concurrent requests
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    "https://api.mistral.ai/v1/chat/completions",
+                    data=json_data,
+                    headers=headers,
+                    timeout=config.timeout,
+                )
+                print(f"Response: {json.dumps(response.json(), indent=4)}")
+            logger.info(f"Forwarding request to Mistral API")
+            return JSONResponse(content=response.json(), status_code=response.status_code)
     except Exception as e:
         logger.error(f"Error calling Mistral API: {str(e)}")
         return JSONResponse(status_code=500, content={"error": "Internal server error"})
