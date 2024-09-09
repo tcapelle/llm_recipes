@@ -63,7 +63,7 @@ async def rate_limit_middleware(request: Request, call_next):
     return response
 
 @weave.op
-async def log_data(input, output):
+async def log_data(ip, input, output):
     return 
 
 @app.post("/v1/{path:path}")
@@ -73,7 +73,6 @@ async def forward_request(request: Request, path: str):
 
     headers = request.headers
     # headers["authorization"] = f"Bearer {config.mistral_api_key}"
-    print(f"Headers: {headers}")
     
     # Parse the JSON body
     try:
@@ -89,9 +88,10 @@ async def forward_request(request: Request, path: str):
             "Authorization": f"Bearer {config.mistral_api_key}"
         }
         # Log the full request details before sending
-        print(f"Headers: {json.dumps(headers, indent=4)}")
+        print("-" * 100)
+        print(f"Headers: \n{json.dumps(headers, indent=4)}")
         json_data = json.dumps(data, ensure_ascii=False, indent=4)
-        print(f"Data being sent: {json_data}")
+        print(f"Data being sent: \n{json_data}")
         async with semaphore:  # Use semaphore to limit concurrent requests
             async with httpx.AsyncClient() as client:
                 response = await client.post(
@@ -100,10 +100,12 @@ async def forward_request(request: Request, path: str):
                     headers=headers,
                     timeout=config.timeout,
                 )
-                print(f"Response: {json.dumps(response.json(), indent=4)}")
+                print("-" * 100)
+                print(f"Response: \n{json.dumps(response.json(), indent=4)}")
+                print("=" * 100)
             logger.info(f"Forwarding request to Mistral API")
             output =  JSONResponse(content=response.json(), status_code=response.status_code)
-            await log_data(data, response.json())
+            await log_data(request.client.host, data, response.json())
             return output
     except Exception as e:
         logger.error(f"Error calling Mistral API: {str(e)}")
