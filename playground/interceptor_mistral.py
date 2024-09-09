@@ -35,7 +35,7 @@ config = simple_parsing.parse(Config)
 # Set up logging
 logger = logging.getLogger('uvicorn.error')
 logging.basicConfig(level=config.log_level)
-weave.init(project=config.weave_project)
+weave.init(config.weave_project)
 
 # Set up rate limiter
 mem_storage = storage.MemoryStorage()
