@@ -6,6 +6,7 @@ import json
 import httpx
 import logging
 import os
+import weave
 from dataclasses import dataclass
 
 from limits import storage
@@ -27,12 +28,14 @@ class Config:
     server_host: str = "0.0.0.0"
     server_port: int = 8000
     log_level: str = "INFO"
+    weave_project: str = "prompt-eng/interceptor-mistral-hackercup"
 
 config = simple_parsing.parse(Config)
 
 # Set up logging
 logger = logging.getLogger('uvicorn.error')
 logging.basicConfig(level=config.log_level)
+weave.init(project=config.weave_project)
 
 # Set up rate limiter
 mem_storage = storage.MemoryStorage()
@@ -58,6 +61,10 @@ async def rate_limit_middleware(request: Request, call_next):
         return JSONResponse(status_code=429, content=rate_limit_response)
     response = await call_next(request)
     return response
+
+@weave.op
+async def log_data(input, output):
+    return 
 
 @app.post("/v1/{path:path}")
 async def forward_request(request: Request, path: str):
@@ -85,7 +92,6 @@ async def forward_request(request: Request, path: str):
         print(f"Headers: {json.dumps(headers, indent=4)}")
         json_data = json.dumps(data, ensure_ascii=False, indent=4)
         print(f"Data being sent: {json_data}")
-
         async with semaphore:  # Use semaphore to limit concurrent requests
             async with httpx.AsyncClient() as client:
                 response = await client.post(
@@ -96,7 +102,9 @@ async def forward_request(request: Request, path: str):
                 )
                 print(f"Response: {json.dumps(response.json(), indent=4)}")
             logger.info(f"Forwarding request to Mistral API")
-            return JSONResponse(content=response.json(), status_code=response.status_code)
+            response =  JSONResponse(content=response.json(), status_code=response.status_code)
+            log_data(data, response)
+            return response
     except Exception as e:
         logger.error(f"Error calling Mistral API: {str(e)}")
         return JSONResponse(status_code=500, content={"error": "Internal server error"})
