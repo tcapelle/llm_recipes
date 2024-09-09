@@ -103,7 +103,7 @@ async def forward_request(request: Request, path: str):
                 print(f"Response: {json.dumps(response.json(), indent=4)}")
             logger.info(f"Forwarding request to Mistral API")
             response =  JSONResponse(content=response.json(), status_code=response.status_code)
-            log_data(data, response)
+            await log_data(data, response)
             return response
     except Exception as e:
         logger.error(f"Error calling Mistral API: {str(e)}")
