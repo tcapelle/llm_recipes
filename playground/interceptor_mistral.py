@@ -1,5 +1,5 @@
 import asyncio
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, BackgroundTasks
 from fastapi.responses import JSONResponse
 import uvicorn
 import json
@@ -10,6 +10,7 @@ import weave
 from dataclasses import dataclass
 import time
 from collections import deque
+from contextlib import asynccontextmanager
 
 from limits import storage
 from limits.strategies import FixedWindowRateLimiter
@@ -32,6 +33,7 @@ class Config:
     log_level: str = "INFO"
     weave_project: str = "prompt-eng/interceptor-mistral-hackercup"
     stats_window_size: int = 3600  # 1 hour window for statistics
+    verbose: bool = False
 
 config = simple_parsing.parse(Config)
 
@@ -95,8 +97,34 @@ class Stats:
         
         return tokens_last_minute, tokens_last_hour
 
+    async def print_stats_periodically(self):
+        while True:
+            await asyncio.sleep(20)  # Wait for 60 seconds
+            rps, rpm = self.calculate_request_stats()
+            tokens_per_minute, tokens_per_hour = self.calculate_token_stats()
+            print("=" * 100)
+            logger.info(f"PERIODIC STATS:")
+            logger.info(f"Current RPS: {rps:.2f}")
+            logger.info(f"RPM: {rpm}")
+            logger.info(f"Tokens/min: {tokens_per_minute}")
+            logger.info(f"Tokens/hour: {tokens_per_hour}")
+
 # Initialize Stats
 stats = Stats(config.stats_window_size)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Start the background task to print stats periodically
+    stats_task = asyncio.create_task(stats.print_stats_periodically())
+    yield
+    # Shutdown: Cancel the background task
+    stats_task.cancel()
+    try:
+        await stats_task
+    except asyncio.CancelledError:
+        pass
+
+app = FastAPI(lifespan=lifespan)
 
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
@@ -132,10 +160,11 @@ async def forward_request(request: Request, path: str):
             "Authorization": f"Bearer {config.mistral_api_key}"
         }
         # Log the full request details before sending
-        print("-" * 100)
-        print(f"Headers: \n{json.dumps(headers, indent=4)}")
         json_data = json.dumps(data, ensure_ascii=False, indent=4)
-        print(f"Data being sent: \n{json_data}")
+        if config.verbose:
+            print("-" * 100)
+            print(f"Headers: \n{json.dumps(headers, indent=4)}")
+            print(f"Data being sent: \n{json_data}")
         async with semaphore:  # Use semaphore to limit concurrent requests
             async with httpx.AsyncClient() as client:
                 response = await client.post(
@@ -144,22 +173,20 @@ async def forward_request(request: Request, path: str):
                     headers=headers,
                     timeout=config.timeout,
                 )
-                print("-" * 100)
-                print(f"Response: \n{json.dumps(response.json(), indent=4)}")
-                print("=" * 100)
+                if config.verbose:
+                    print("-" * 100)
+                    print(f"Response: \n{json.dumps(response.json(), indent=4)}")
+                    print("=" * 100)
             logger.info(f"Forwarding request to Mistral API")
             output =  JSONResponse(content=response.json(), status_code=response.status_code)
             await log_data(request.client.host, data, response.json())
             # Record request time and token count
             current_time = time.time()
             total_tokens = response.json().get('usage', {}).get('total_tokens', 0)
+            logger.info(f"Serving request from {request.client.host} with {total_tokens} tokens")
             stats.record_request(current_time, total_tokens)
             
-            # Calculate and log statistics
-            rps, rpm = stats.calculate_request_stats()
-            tokens_per_minute, tokens_per_hour = stats.calculate_token_stats()
-            logger.info(f"STATS:\nCurrent RPS: {rps:.2f}\nRPM: {rpm}\nTokens/min: {tokens_per_minute}\nTokens/hour: {tokens_per_hour}")
-            
+            # Remove the per-request stats logging from here
             return output
     except Exception as e:
         logger.error(f"Error calling Mistral API: {str(e)}")
