@@ -9,7 +9,7 @@ import os
 import weave
 from dataclasses import dataclass
 import time
-from collections import deque
+from collections import deque, Counter
 from contextlib import asynccontextmanager
 
 from limits import storage
@@ -64,10 +64,14 @@ class Stats:
         self.window_size = window_size
         self.request_times = deque(maxlen=window_size)
         self.token_counts = deque(maxlen=window_size)
+        self.user_requests = deque(maxlen=window_size)
+        self.unique_users = Counter()
 
-    def record_request(self, timestamp, tokens):
+    def record_request(self, timestamp, tokens, user_ip):
         self.request_times.append(timestamp)
         self.token_counts.append((timestamp, tokens))
+        self.user_requests.append((timestamp, user_ip))
+        self.unique_users[user_ip] += 1
 
     def calculate_request_stats(self):
         if not self.request_times:
@@ -97,17 +101,28 @@ class Stats:
         
         return tokens_last_minute, tokens_last_hour
 
+    def calculate_unique_users(self, time_window=3600):
+        current_time = time.time()
+        cutoff_time = current_time - time_window
+        recent_users = set(ip for t, ip in self.user_requests if t > cutoff_time)
+        return len(recent_users)
+
     async def print_stats_periodically(self):
         while True:
-            await asyncio.sleep(20)  # Wait for 60 seconds
+            await asyncio.sleep(20)  # Wait for 20 seconds
             rps, rpm = self.calculate_request_stats()
             tokens_per_minute, tokens_per_hour = self.calculate_token_stats()
+            unique_users_hour = self.calculate_unique_users(3600)  # Last hour
+            unique_users_day = self.calculate_unique_users(86400)  # Last 24 hours
             print("=" * 100)
             logger.info(f"PERIODIC STATS:")
             logger.info(f"Current RPS: {rps:.2f}")
             logger.info(f"RPM: {rpm}")
             logger.info(f"Tokens/min: {tokens_per_minute}")
             logger.info(f"Tokens/hour: {tokens_per_hour}")
+            logger.info(f"Unique users (last hour): {unique_users_hour}")
+            logger.info(f"Unique users (last 24 hours): {unique_users_day}")
+            print("=" * 100)
 
 # Initialize Stats
 stats = Stats(config.stats_window_size)
@@ -177,14 +192,14 @@ async def forward_request(request: Request, path: str):
                     print("-" * 100)
                     print(f"Response: \n{json.dumps(response.json(), indent=4)}")
                     print("=" * 100)
-            logger.info(f"Forwarding request to Mistral API")
             output =  JSONResponse(content=response.json(), status_code=response.status_code)
             await log_data(request.client.host, data, response.json())
-            # Record request time and token count
+            # Record request time, token count, and user IP
             current_time = time.time()
             total_tokens = response.json().get('usage', {}).get('total_tokens', 0)
-            logger.info(f"Serving request from {request.client.host} with {total_tokens} tokens")
-            stats.record_request(current_time, total_tokens)
+            user_ip = request.client.host
+            logger.info(f"Serving request from {user_ip} with {total_tokens} tokens")
+            stats.record_request(current_time, total_tokens, user_ip)
             
             # Remove the per-request stats logging from here
             return output
