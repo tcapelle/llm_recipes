@@ -40,6 +40,7 @@ config = simple_parsing.parse(Config)
 # Set up logging
 logger = logging.getLogger('uvicorn.error')
 logging.basicConfig(level=config.log_level)
+logging.getLogger("httpx").setLevel(logging.WARNING)
 weave.init(config.weave_project)
 
 # Set up rate limiter
