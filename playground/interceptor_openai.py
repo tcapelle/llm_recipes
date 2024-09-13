@@ -25,8 +25,8 @@ app = FastAPI()
 
 @dataclass
 class Config:
-    rate_limit_requests_per_minute: int = 1
-    max_concurrent_requests: int = 2  # New parameter for semaphore
+    rate_limit_requests_per_minute: int = 2
+    max_concurrent_requests: int = 5  # New parameter for semaphore
     rate_limit_error_message: str = "Rate limit exceeded. Please try again later."
     server_host: str = "0.0.0.0"
     server_port: int = 8010
@@ -34,7 +34,7 @@ class Config:
     weave_project: str = "prompt-eng/interceptor-openai"
     stats_window_size: int = 3600  # 1 hour window for statistics
     verbose: bool = False
-    supported_models = ["o1-preview", "o1-mini"]
+    supported_models = ["o1-preview", "o1-mini", "gpt-4o-mini"]
 
 config = simple_parsing.parse(Config)
 
@@ -141,8 +141,13 @@ async def rate_limit_middleware(request: Request, call_next):
     response = await call_next(request)
     return response
 
+@app.get("/v1/models")  # Changed from @app.post to @app.get
+async def list_models(request: Request):
+    return JSONResponse(content={"models_allowed" :[model for model in config.supported_models],
+                                 "rate_limit_requests_per_minute": config.rate_limit_requests_per_minute,
+                                 "max_concurrent_requests": config.max_concurrent_requests})
 
-@app.post("/v1/{path:path}")
+@app.post("/v1/chat/completions/{path:path}")
 async def forward_request(request: Request, path: str):
     # Get the request body
     body = await request.body()
