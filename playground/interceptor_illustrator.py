@@ -211,12 +211,15 @@ def get_weave_link(stdout: str):
         return None
     
 def get_wandb_user(stdout: str):
-    "Logged in as Weights & Biases user: geekyrakshit."
-    match = re.search(r'Logged in as Weights & Biases user: (.*?).', stdout)
+    """Extracts the W&B user:
+    s = "Logged in as Weights & Biases user: geekyrakshit."
+    user = get_wandb_user(s)
+    assert user == "geekyrakshit"
+    """
+    match = re.search(r'Logged in as Weights & Biases user: (.*)\.', stdout)
     if match:
         return match.group(1).strip()
-    else:
-        return None
+    return None
 
 def get_images_dict(stdout: str):
     image_base64_dict = json.loads(stdout.split("<img>")[-1].split("</img>")[-2])
