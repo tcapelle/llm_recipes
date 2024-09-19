@@ -85,6 +85,8 @@ class IllustratePayload(BaseModel):
     story_author: str = Field(..., description="The author of the story")
     story_setting: str = Field(..., description="The setting of the story")
     wandb_api_key: str = Field(..., description="The wandb api key", min_length=40, max_length=40)
+    return_images: bool = Field(default=False, description="Whether to return the images in the response")
+    dummy: bool = Field(default=False, description="Whether to use the dummy images")
 
     @field_validator('wandb_api_key')
     def validate_wandb_api_key(cls, v):
@@ -108,11 +110,11 @@ def clean_wandb_api_key():
     else:
         logger.info(f"{netrc_path} does not exist")
 
-def setup_wandb(payload: IllustratePayload):
+def setup_wandb(wandb_api_key: str):
     clean_wandb_api_key()
-    logger.info(f"Logging into wandb with key: {payload.wandb_api_key}")
+    logger.info(f"Logging into wandb with key: {wandb_api_key}")
     import wandb
-    wandb.login(key=payload.wandb_api_key, relogin=True)
+    wandb.login(key=wandb_api_key, relogin=True)
     
     print("Attemp login to Weave")
     import weave
@@ -120,7 +122,7 @@ def setup_wandb(payload: IllustratePayload):
 
 
 def generate_illustration_process(payload: IllustratePayload):
-    setup_wandb(payload)
+    setup_wandb(payload.wandb_api_key)
     result = illustrate(
         story=payload.story,
         story_title=payload.story_title,
@@ -148,13 +150,30 @@ def load_image(fn, mode=None):
 
 def dummy_generate_illustration_process(payload: IllustratePayload, n=2):
     "Generate n dummy PIL.Images objects"
-    setup_wandb(payload)
+    setup_wandb(payload.wandb_api_key)
+
+    #dummy op to generate traces
     import weave
-    @weave.op
+    @weave.op(name="dummy_generate_illustration_process")
     def dummy_gen():
         return [load_image("pug.png") for _ in range(n)]
+    
     clean_wandb_api_key()
     return dummy_gen()
+
+def generate_images(payload: IllustratePayload):
+    if payload.dummy:
+        images = dummy_generate_illustration_process(payload, n=2)
+    else:
+        images = generate_illustration_process(payload)
+    if payload.return_images:
+        images_dict = {f"image_{i}": image_to_base64(image) for i, image in enumerate(images)}
+        print("<img>")
+        print(json.dumps(images_dict))
+        print("</img>")
+    else:
+        print("<img>")
+        print("</img>")
 
 @dataclass
 class Args:
@@ -164,15 +183,10 @@ class Args:
     story_setting: str = "The setting of the story"
     wandb_api_key: str = "dummy_key"
     dummy: bool = False
+    return_images: bool = False
 
 if __name__ == "__main__":
     args = simple_parsing.parse(Args)
-    if args.dummy:
-        images = dummy_generate_illustration_process(args, n=2)
-    else:
-        images = generate_illustration_process(args)
-    images_dict = {f"image_{i}": image_to_base64(image) for i, image in enumerate(images)}
-    images_dict = {f"image_{i}": image_to_base64(image) for i, image in enumerate(images)}
-    print("<img>")
-    print(json.dumps(images_dict))
-    print("</img>")
+    args_dict = vars(args)
+    payload = IllustratePayload.model_validate(args_dict)
+    generate_images(payload)

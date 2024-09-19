@@ -41,7 +41,6 @@ class Config:
     stats_window_size: int = 3600  # 1 hour window for statistics
     verbose: bool = False
     python_executable: str = "illustrator.py"
-    dummy: bool = False
 
 config = simple_parsing.parse(Config)
 
@@ -197,7 +196,6 @@ async def run_python(program: Path, *args, timeout: float = 200):
 async def generate_illustration(payload: IllustratePayload):
     # Run the python script
     args = [f"--{k}={v}" for k,v in payload.model_dump().items()]
-    args += ["--dummy"] if config.dummy else []
     if config.verbose:
         print(f"Running {config.python_executable} with args:")
         for arg in args:
@@ -275,9 +273,10 @@ async def forward_request(request: Request, path: str):
                 print("...")
                 print("="*100)
             # Record the request and update stats
-            stats.record_request(time.time(), 0, client_ip)
-
-            image_base64_dict = get_images_dict(stdout)
+            if payload.return_images:
+                image_base64_dict = get_images_dict(stdout)
+            else:
+                image_base64_dict = {f"image_{i}": "no_image" for i in range(num_images)}
             
             # compute some stats
             current_time = time.time()
@@ -293,8 +292,7 @@ async def forward_request(request: Request, path: str):
             })
     except Exception as e:
         logger.error(f"Error generating illustration: {e}")
-        wandb_error = """1. Sign up to a free Weights & Biases account at https://www.wandb.ai 
-        2. Set WANDB_API_KEY to your API key from https://www.wandb.ai/authorize"""
+        wandb_error = """1. Sign up to a free Weights & Biases account at https://www.wandb.ai \n2. Set WANDB_API_KEY to your API key from https://www.wandb.ai/authorize"""
         if "wandb login" in str(e):
             return JSONResponse(status_code=500, content={"error": wandb_error})
         return JSONResponse(status_code=500, content={"error": str(e)})
