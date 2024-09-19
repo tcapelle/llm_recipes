@@ -114,6 +114,7 @@ def setup_wandb(payload: IllustratePayload):
     import wandb
     wandb.login(key=payload.wandb_api_key, relogin=True)
     
+    print("Attemp login to Weave")
     import weave
     weave.init("illustration-project")
 
@@ -141,7 +142,9 @@ def get_images_dict(stdout: str):
 def dummy_generate_illustration_process(payload: IllustratePayload, n=2):
     "Generate n dummy PIL.Images objects"
     setup_wandb(payload)
-    return [Image.new("RGB", (100, 100), (255, 255, 255)) for _ in range(n)]
+    images = [Image.new("RGB", (100, 100), (255, 255, 255)) for _ in range(n)]
+    clean_wandb_api_key()
+    return images
 
 @dataclass
 class Args:
