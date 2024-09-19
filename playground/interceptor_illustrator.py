@@ -9,7 +9,6 @@ import json
 import httpx
 import logging
 import openai
-import wandb
 from pathlib import Path
 import sys
 from dataclasses import dataclass
@@ -235,9 +234,9 @@ async def forward_request(request: Request, path: str):
         
         # Wait for the result
         stdout, stderr = await generate_illustration(payload)
-        
-        
-
+        print("="*100)
+        print(stdout)
+        print("="*100)
         # Record the request and update stats
         stats.record_request(time.time(), 0, client_ip)  # Update with actual token count if available
         image_base64_dict = get_images_dict(stdout)
