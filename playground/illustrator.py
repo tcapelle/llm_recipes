@@ -142,9 +142,12 @@ def get_images_dict(stdout: str):
 def dummy_generate_illustration_process(payload: IllustratePayload, n=2):
     "Generate n dummy PIL.Images objects"
     setup_wandb(payload)
-    images = [Image.new("RGB", (100, 100), (255, 255, 255)) for _ in range(n)]
+    import weave
+    @weave.op
+    def dummy_gen():
+        return [Image.new("RGB", (100, 100), (255, 255, 255)) for _ in range(n)]
     clean_wandb_api_key()
-    return images
+    return dummy_gen()
 
 @dataclass
 class Args:
