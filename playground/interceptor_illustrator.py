@@ -18,6 +18,8 @@ from contextlib import asynccontextmanager
 from limits import storage
 from limits.strategies import FixedWindowRateLimiter
 from limits import RateLimitItemPerMinute
+from rich.logging import RichHandler
+
 
 import simple_parsing
 
@@ -43,9 +45,13 @@ class Config:
 
 config = simple_parsing.parse(Config)
 
-# Set up logging
 logger = logging.getLogger('interceptor')
-logging.basicConfig(level=config.log_level)
+logging.basicConfig(
+    level=config.log_level,
+    format="%(message)s",
+    datefmt="[%X]",
+    handlers=[RichHandler(markup=True)]
+)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 # Set up rate limiter
@@ -277,7 +283,7 @@ async def forward_request(request: Request, path: str):
             current_time = time.time()
             total_images = len(image_base64_dict)
             wandb_user = get_wandb_user(stdout) # Update with actual token count if available
-            logger.info(f"Served {total_images} images to {wandb_user} at {client_ip}")
+            logger.info(f"Served {total_images} images to [cyan]{wandb_user}[/] at {client_ip}")
             stats.record_request(current_time, total_images, client_ip)
 
             return JSONResponse(content={
