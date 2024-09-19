@@ -160,8 +160,9 @@ async def run_python(program: Path, *args, timeout: float = 200):
     """
     Run a Python program with the given input file and output file.
     """
-    print(f"Executing {sys.executable} {program} with args: {args}\n")
-    print("=" * 100)
+    if config.verbose:
+        print(f"Executing {sys.executable} {program} with args: {args}\n")
+        print("=" * 100)
 
     try:
         process = await asyncio.create_subprocess_exec(
@@ -191,10 +192,11 @@ async def generate_illustration(payload: IllustratePayload):
     # Run the python script
     args = [f"--{k}={v}" for k,v in payload.model_dump().items()]
     args += ["--dummy"] if config.dummy else []
-    print(f"Running {config.python_executable} with args:")
-    for arg in args:
-        print(f"  {arg}")
-    print("=" * 100)
+    if config.verbose:
+        print(f"Running {config.python_executable} with args:")
+        for arg in args:
+            print(f"  {arg}")
+        print("=" * 100)
     return await run_python(
         Path(config.python_executable),
         *args,
@@ -217,7 +219,8 @@ async def forward_request(request: Request, path: str):
     """
     Generate an illustration for a story.
     """
-    print("=" * 100)
+    if config.verbose:
+        print("=" * 100)
     headers = request.headers
     wandb_api_key = headers.get("wandb-api-key")
     if wandb_api_key is None:
@@ -230,15 +233,18 @@ async def forward_request(request: Request, path: str):
         data = json.loads(body)
         data["wandb_api_key"] = wandb_api_key
         payload = IllustratePayload.model_validate(data)
-        print("=" * 100)
-        logger.info(f"Received payload: {payload}")
+        if config.verbose:
+            print("=" * 100)
+            print(f"Received payload: {payload}")
     except Exception as e:
         return JSONResponse(status_code=400, content={"error": f"Invalid Payload: {e}"})
 
     # Get the user's IP address
     client_ip = request.client.host
-    logger.info(f"Client IP: {client_ip}")
-    print("=" * 100)
+    num_images = len(payload.story.split("\n\n"))
+    logger.info(f"Got request from client IP: {client_ip} to generate {num_images} images")
+    if config.verbose:
+        print("=" * 100)
 
     try:
         # Use ProcessPoolExecutor to run generate_illustration in a separate process
@@ -246,10 +252,11 @@ async def forward_request(request: Request, path: str):
         # Wait for the result
         async with semaphore:  # Use semaphore to limit concurrent requests
             stdout, stderr = await generate_illustration(payload)
-            print("="*100)
-            print(stdout[:300])
-            print("...")
-            print("="*100)
+            if config.verbose:
+                print("="*100)
+                print(stdout[:300])
+                print("...")
+                print("="*100)
             # Record the request and update stats
             stats.record_request(time.time(), 0, client_ip)  # Update with actual token count if available
             image_base64_dict = get_images_dict(stdout)
