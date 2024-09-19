@@ -6,7 +6,6 @@ from typing import Union
 import base64
 import io
 from pydantic import BaseModel, Field, field_validator
-import wandb
 import logging
 import simple_parsing
 from dataclasses import dataclass
@@ -112,7 +111,9 @@ def clean_wandb_api_key():
 def setup_wandb(payload: IllustratePayload):
     clean_wandb_api_key()
     logger.info(f"Logging into wandb with key: {payload.wandb_api_key}")
+    import wandb
     wandb.login(key=payload.wandb_api_key, relogin=True)
+    
     import weave
     weave.init("illustration-project")
 
