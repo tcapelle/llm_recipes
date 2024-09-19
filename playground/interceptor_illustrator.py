@@ -293,8 +293,10 @@ async def forward_request(request: Request, path: str):
             })
     except Exception as e:
         logger.error(f"Error generating illustration: {e}")
+        wandb_error = """1. Sign up to a free Weights & Biases account at https://www.wandb.ai 
+        2. Set WANDB_API_KEY to your API key from https://www.wandb.ai/authorize"""
         if "wandb login" in str(e):
-            return JSONResponse(status_code=500, content={"error": "wandb login failed, please check your wandb api key"})
+            return JSONResponse(status_code=500, content={"error": wandb_error})
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
