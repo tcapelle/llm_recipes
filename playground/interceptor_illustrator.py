@@ -247,7 +247,8 @@ async def forward_request(request: Request, path: str):
         async with semaphore:  # Use semaphore to limit concurrent requests
             stdout, stderr = await generate_illustration(payload)
             print("="*100)
-            print(stdout)
+            print(stdout[:300])
+            print("...")
             print("="*100)
             # Record the request and update stats
             stats.record_request(time.time(), 0, client_ip)  # Update with actual token count if available
