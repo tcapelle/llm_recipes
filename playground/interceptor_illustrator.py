@@ -1,4 +1,6 @@
 import asyncio
+import re
+import io
 from fastapi import FastAPI, Request, BackgroundTasks
 from fastapi.responses import JSONResponse, StreamingResponse
 import uvicorn
@@ -8,103 +10,24 @@ import httpx
 import logging
 import openai
 import wandb
+from pathlib import Path
+import sys
 from dataclasses import dataclass
 import time
 from collections import deque, Counter
 from typing import Optional
-from concurrent.futures import ProcessPoolExecutor
+import subprocess
 from limits import storage
 from limits.strategies import FixedWindowRateLimiter
 from limits import RateLimitItemPerMinute
 
 import simple_parsing
-from pydantic import BaseModel, Field, field_validator
+
+from illustrator import IllustratePayload
 
 client = openai.AsyncOpenAI()
 app = FastAPI()
 
-from story_illustrator.models import FalAITextToImageGenerationModel, StoryIllustrator
-
-def illustrate(
-    story: str,
-    story_title: str = "Gift of the Magi",
-    story_author: str = "O. Henry",
-    story_setting: str = "the year 1905, New York City, United States of America",
-    openai_model: str = "gpt-4o",
-    llm_seed: Optional[int] = None,
-    txt2img_model_address: str = "fal-ai/flux-pro",
-    image_size: str = "square",
-    illustration_style: Optional[str] = None,
-    use_text_encoder_2: bool = False,
-):
-    story_illustrator = StoryIllustrator(
-        openai_model=openai_model,
-        llm_seed=llm_seed,
-        text_to_image_model=FalAITextToImageGenerationModel(
-            model_address=txt2img_model_address
-        ),
-    )
-    paragraphs = story.split("\n\n")
-    story_illustrator.predict(
-        story=story,
-        metadata={
-            "title": story_title,
-            "author": story_author,
-            "setting": story_setting,
-        },
-        paragraphs=paragraphs[:10],
-        illustration_style=illustration_style,
-        use_text_encoder_2=use_text_encoder_2,
-        image_size=image_size,
-    )
-    
-
-class IllustratePayload(BaseModel):
-    story: str = Field(..., description="The text of the story to illustrate")
-    story_title: str = Field(..., description="The title of the story")
-    story_author: str = Field(..., description="The author of the story")
-    story_setting: str = Field(..., description="The setting of the story")
-    wandb_api_key: str = Field(..., description="The wandb api key", min_length=40, max_length=40)
-
-    @field_validator('wandb_api_key')
-    def validate_wandb_api_key(cls, v):
-        if len(v) != 40:
-            raise ValueError('wandb_api_key must be exactly 40 characters long')
-        return v
-
-def clean_wandb_api_key():
-    if "WANDB_API_KEY" in os.environ:
-        os.unsetenv('WANDB_API_KEY')
-        del os.environ["WANDB_API_KEY"]
-    
-    # Delete the ~/.netrc file if it exists
-    netrc_path = os.path.expanduser("~/.netrc")
-    if os.path.exists(netrc_path):
-        try:
-            os.remove(netrc_path)
-            logger.info(f"Deleted {netrc_path}")
-        except OSError as e:
-            logger.error(f"Error deleting {netrc_path}: {e}")
-    else:
-        logger.info(f"{netrc_path} does not exist")
-
-def generate_illustration_process(payload: IllustratePayload):
-    # Set the WANDB_API_KEY environment variable
-    clean_wandb_api_key()
-
-    logger.info(f"Logging into wandb with key: {payload.wandb_api_key}")
-    wandb.login(key=payload.wandb_api_key, relogin=True)
-    
-    import weave
-    weave.init("illustration-project")
-    result = illustrate(
-        story=payload.story,
-        story_title=payload.story_title,
-        story_author=payload.story_author,
-        story_setting=payload.story_setting,
-    )
-    clean_wandb_api_key()
-    return result
 
 @dataclass
 class Config:
@@ -119,11 +42,10 @@ class Config:
     weave_project: str = "interceptor-illustrator"
     stats_window_size: int = 3600  # 1 hour window for statistics
     verbose: bool = False
+    python_executable: str = "illustrator.py"
+    dummy: bool = False
 
 config = simple_parsing.parse(Config)
-
-# Create a ProcessPoolExecutor
-process_pool = ProcessPoolExecutor(max_workers=config.max_concurrent_requests)
 
 # Set up logging
 logger = logging.getLogger('interceptor')
@@ -224,6 +146,62 @@ async def rate_limit_middleware(request: Request, call_next):
     response = await call_next(request)
     return response
 
+async def run_python(program: Path, *args, timeout: float = 200):
+    """
+    Run a Python program with the given input file and output file.
+    """
+    print(f"Executing {sys.executable} {program} with args: {args}\n")
+    print("=" * 100)
+
+    try:
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            program,
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        try:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+        except asyncio.TimeoutError:
+            process.kill()
+            raise TimeoutError(f"Program execution timed out after {timeout} seconds")
+
+        if process.returncode != 0:
+            raise RuntimeError(f"Program execution failed: {stderr.decode()}")
+
+        return stdout.decode(), stderr.decode()
+
+    except Exception as e:
+        raise RuntimeError(f"Error running Python program: {str(e)}")
+
+
+async def generate_illustration(payload: IllustratePayload):
+    # Run the python script
+    args = [f"--{k}={v}" for k,v in payload.model_dump().items()]
+    args += ["--dummy"] if config.dummy else []
+    print(f"Running {config.python_executable} with args:")
+    for arg in args:
+        print(f"  {arg}")
+    print("=" * 100)
+    return await run_python(
+        Path(config.python_executable),
+        *args,
+    )
+
+def get_weave_link(stdout: str):
+    "Use regex to parse everything between two newlines and \\n🍩 and \\n"
+    match = re.search(r'\n🍩(.*?)\n', stdout, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    else:
+        return None
+
+def get_images_dict(stdout: str):
+    image_base64_dict = json.loads(stdout.split("<img>")[-1].split("</img>")[-2])
+    return image_base64_dict
+
 @app.post("/illustrate/{path:path}")
 async def forward_request(request: Request, path: str):
     """
@@ -237,8 +215,6 @@ async def forward_request(request: Request, path: str):
     logger.info(f"Headers: {headers}")
     # Get the request body
     body = await request.body()
-    logger.info(f"Body: {body}")
-
     # Parse the JSON body
     try:
         data = json.loads(body)
@@ -256,19 +232,21 @@ async def forward_request(request: Request, path: str):
 
     try:
         # Use ProcessPoolExecutor to run generate_illustration in a separate process
-        future = process_pool.submit(generate_illustration_process, payload)
         
         # Wait for the result
-        result = await asyncio.get_event_loop().run_in_executor(None, future.result)
+        stdout, stderr = await generate_illustration(payload)
         
+        
+
         # Record the request and update stats
         stats.record_request(time.time(), 0, client_ip)  # Update with actual token count if available
-        
-        # Check if the result is an image
-        if isinstance(result, bytes):
-            return StreamingResponse(io.BytesIO(result), media_type="image/png")
-        else:
-            return JSONResponse(content={"result": result})
+        image_base64_dict = get_images_dict(stdout)
+        # Return the output as part of the response
+        return JSONResponse(content={
+            "result": f"Generated {len(image_base64_dict)} images successfully",
+            "weave_trace": get_weave_link(stdout),
+            "images": image_base64_dict,
+        })
     except Exception as e:
         logger.error(f"Error generating illustration: {e}")
         if "wandb login" in str(e):
