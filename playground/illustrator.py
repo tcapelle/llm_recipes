@@ -145,7 +145,7 @@ def dummy_generate_illustration_process(payload: IllustratePayload, n=2):
     import weave
     @weave.op
     def dummy_gen():
-        return [Image.new("RGB", (100, 100), (255, 255, 255)) for _ in range(n)]
+        return [Image.open("pug.jpg") for _ in range(n)]
     clean_wandb_api_key()
     return dummy_gen()
 
