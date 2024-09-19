@@ -1,8 +1,8 @@
 import asyncio
 import re
 import io
-from fastapi import FastAPI, Request, BackgroundTasks
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 import uvicorn
 import os
 import json
@@ -14,8 +14,7 @@ import sys
 from dataclasses import dataclass
 import time
 from collections import deque, Counter
-from typing import Optional
-import subprocess
+from contextlib import asynccontextmanager
 from limits import storage
 from limits.strategies import FixedWindowRateLimiter
 from limits import RateLimitItemPerMinute
@@ -25,8 +24,6 @@ import simple_parsing
 from illustrator import IllustratePayload
 
 client = openai.AsyncOpenAI()
-app = FastAPI()
-
 
 @dataclass
 class Config:
@@ -72,13 +69,13 @@ class Stats:
     def __init__(self, window_size):
         self.window_size = window_size
         self.request_times = deque(maxlen=window_size)
-        self.token_counts = deque(maxlen=window_size)
+        self.image_counts = deque(maxlen=window_size)
         self.user_requests = deque(maxlen=window_size)
         self.unique_users = Counter()
 
-    def record_request(self, timestamp, tokens, user_ip):
+    def record_request(self, timestamp, images, user_ip):
         self.request_times.append(timestamp)
-        self.token_counts.append((timestamp, tokens))
+        self.image_counts.append((timestamp, images))
         self.user_requests.append((timestamp, user_ip))
         self.unique_users[user_ip] += 1
 
@@ -97,18 +94,18 @@ class Stats:
         
         return rps, rpm
 
-    def calculate_token_stats(self):
-        if not self.token_counts:
+    def calculate_image_stats(self):
+        if not self.image_counts:
             return 0, 0
         
         current_time = time.time()
         one_minute_ago = current_time - 60
         one_hour_ago = current_time - 3600
         
-        tokens_last_minute = sum(count for t, count in self.token_counts if t > one_minute_ago)
-        tokens_last_hour = sum(count for t, count in self.token_counts if t > one_hour_ago)
+        images_last_minute = sum(count for t, count in self.image_counts if t > one_minute_ago)
+        images_last_hour = sum(count for t, count in self.image_counts if t > one_hour_ago)
         
-        return tokens_last_minute, tokens_last_hour
+        return images_last_minute, images_last_hour
 
     def calculate_unique_users(self, time_window=3600):
         current_time = time.time()
@@ -120,7 +117,7 @@ class Stats:
         while True:
             await asyncio.sleep(20)  # Wait for 20 seconds
             rps, rpm = self.calculate_request_stats()
-            tokens_per_minute, tokens_per_hour = self.calculate_token_stats()
+            images_per_minute, images_per_hour = self.calculate_image_stats()
             unique_users_hour = self.calculate_unique_users(3600)  # Last hour
             unique_users_day = self.calculate_unique_users(86400)  # Last 24 hours
             
@@ -128,14 +125,28 @@ class Stats:
             logger.info(f"PERIODIC STATS:")
             logger.info(f"Current RPS: {rps:.2f}")
             logger.info(f"RPM: {rpm}")
-            logger.info(f"Tokens/min: {tokens_per_minute}")
-            logger.info(f"Tokens/hour: {tokens_per_hour}")
+            logger.info(f"Images/min: {images_per_minute}")
+            logger.info(f"Images/hour: {images_per_hour}")
             logger.info(f"Unique users (last hour): {unique_users_hour}")
             logger.info(f"Unique users (last 24 hours): {unique_users_day}")
             print("=" * 100)
 
 # Initialize Stats
 stats = Stats(config.stats_window_size)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Start the background task to print stats periodically
+    stats_task = asyncio.create_task(stats.print_stats_periodically())
+    yield
+    # Shutdown: Cancel the background task
+    stats_task.cancel()
+    try:
+        await stats_task
+    except asyncio.CancelledError:
+        pass
+
+app = FastAPI(lifespan=lifespan)
 
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
@@ -233,19 +244,26 @@ async def forward_request(request: Request, path: str):
         # Use ProcessPoolExecutor to run generate_illustration in a separate process
         
         # Wait for the result
-        stdout, stderr = await generate_illustration(payload)
-        print("="*100)
-        print(stdout)
-        print("="*100)
-        # Record the request and update stats
-        stats.record_request(time.time(), 0, client_ip)  # Update with actual token count if available
-        image_base64_dict = get_images_dict(stdout)
-        # Return the output as part of the response
-        return JSONResponse(content={
-            "result": f"Generated {len(image_base64_dict)} images successfully",
-            "weave_trace": get_weave_link(stdout),
-            "images": image_base64_dict,
-        })
+        async with semaphore:  # Use semaphore to limit concurrent requests
+            stdout, stderr = await generate_illustration(payload)
+            print("="*100)
+            print(stdout)
+            print("="*100)
+            # Record the request and update stats
+            stats.record_request(time.time(), 0, client_ip)  # Update with actual token count if available
+            image_base64_dict = get_images_dict(stdout)
+            
+            # compute some stats
+            current_time = time.time()
+            total_images = len(image_base64_dict)
+
+            stats.record_request(current_time, total_images, client_ip)
+
+            return JSONResponse(content={
+                "result": f"Generated {total_images} images successfully",
+                "weave_trace": get_weave_link(stdout),
+                "images": image_base64_dict,
+            })
     except Exception as e:
         logger.error(f"Error generating illustration: {e}")
         if "wandb login" in str(e):
