@@ -209,6 +209,14 @@ def get_weave_link(stdout: str):
         return match.group(1).strip()
     else:
         return None
+    
+def get_wandb_user(stdout: str):
+    "Logged in as Weights & Biases user: geekyrakshit."
+    match = re.search(r'Logged in as Weights & Biases user: (.*?).', stdout)
+    if match:
+        return match.group(1).strip()
+    else:
+        return None
 
 def get_images_dict(stdout: str):
     image_base64_dict = json.loads(stdout.split("<img>")[-1].split("</img>")[-2])
@@ -225,7 +233,6 @@ async def forward_request(request: Request, path: str):
     wandb_api_key = headers.get("wandb-api-key")
     if wandb_api_key is None:
         return JSONResponse(status_code=400, content={"error": "wandb-api-key header is required"})
-    logger.info(f"Headers: {headers}")
     # Get the request body
     body = await request.body()
     # Parse the JSON body
@@ -234,6 +241,7 @@ async def forward_request(request: Request, path: str):
         data["wandb_api_key"] = wandb_api_key
         payload = IllustratePayload.model_validate(data)
         if config.verbose:
+            print(f"Headers: {headers}")
             print("=" * 100)
             print(f"Received payload: {payload}")
     except Exception as e:
@@ -258,13 +266,15 @@ async def forward_request(request: Request, path: str):
                 print("...")
                 print("="*100)
             # Record the request and update stats
-            stats.record_request(time.time(), 0, client_ip)  # Update with actual token count if available
+            stats.record_request(time.time(), 0, client_ip)
+
             image_base64_dict = get_images_dict(stdout)
             
             # compute some stats
             current_time = time.time()
             total_images = len(image_base64_dict)
-
+            wandb_user = get_wandb_user(stdout) # Update with actual token count if available
+            logger.info(f"Served {total_images} images to {wandb_user} at {client_ip}")
             stats.record_request(current_time, total_images, client_ip)
 
             return JSONResponse(content={
