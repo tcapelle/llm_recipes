@@ -139,13 +139,20 @@ def get_images_dict(stdout: str):
     image_base64_dict = json.loads(dict_str)
     return image_base64_dict
 
+def load_image(fn, mode=None):
+    "Open and load a `PIL.Image` and convert to `mode`"
+    im = Image.open(fn)
+    im.load()
+    im = im._new(im.im)
+    return im
+
 def dummy_generate_illustration_process(payload: IllustratePayload, n=2):
     "Generate n dummy PIL.Images objects"
     setup_wandb(payload)
     import weave
     @weave.op
     def dummy_gen():
-        return [Image.open("pug.jpg") for _ in range(n)]
+        return [load_image("pug.png") for _ in range(n)]
     clean_wandb_api_key()
     return dummy_gen()
 
