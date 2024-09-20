@@ -14,9 +14,12 @@ REMOTE_URL = "http://195.242.25.198:8020/illustrate/story"
 WANDB_API_KEY = os.environ["WANDB_API_KEY"]
 
 def call_illustrate(payload: dict, url: str):
+    console.print(f"Sending Payload to url={url} :")
+    console.print(vars(payload))
+    console.print("[cyan]==============================================================[/cyan]")
     response = requests.post(
         url, 
-        headers={"wandb-api-key": WANDB_API_KEY}, json=payload)
+        headers={"wandb-api-key": payload["wandb_api_key"]}, json=payload)
 
     return response.json()
 
@@ -41,10 +44,7 @@ if __name__ == "__main__":
     parser.add_arguments(Payload, dest="payload")
     args = parser.parse_args()
     url = LOCAL_URL if args.local else REMOTE_URL
-    console.print(f"Sending Payload to url={url} :")
-    console.print(vars(args.payload))
     payload = IllustratePayload.model_validate(vars(args.payload))
-    console.print("[cyan]==============================================================[/cyan]")
     response = call_illustrate(payload.model_dump(), url)
     console.print("Response:")
     console.print(response)
