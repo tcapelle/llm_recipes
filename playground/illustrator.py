@@ -1,28 +1,22 @@
 import os
 import json
 from typing import Optional
-from pathlib import Path
 from typing import Union
 import base64
 import io
+import time
 from pydantic import BaseModel, Field, field_validator
 import logging
 import simple_parsing
 from dataclasses import dataclass
 from PIL import Image
+from story_illustrator.models import FalAITextToImageGenerationModel, StoryIllustrator
+
 
 logger = logging.getLogger(__name__)
 
-from story_illustrator.models import FalAITextToImageGenerationModel, StoryIllustrator
 
-EXT_TO_MIMETYPE = {
-    ".jpg": "image/jpeg",
-    ".png": "image/png",
-    ".svg": "image/svg+xml",
-}
-
-def image_to_base64(
-    image_path: Union[str, Image.Image]) -> str:
+def image_to_base64(image_path: Union[str, Image.Image]) -> str:
     """Converts an image to base64 encoded string to be logged and rendered on Weave dashboard.
 
     Args:
@@ -33,11 +27,6 @@ def image_to_base64(
         str: Base64 encoded image string.
     """
     image = Image.open(image_path) if isinstance(image_path, str) else image_path
-    mimetype = (
-        EXT_TO_MIMETYPE[Path(image_path).suffix]
-        if isinstance(image_path, str)
-        else "image/png"
-    )
     byte_arr = io.BytesIO()
     image.save(byte_arr, format="PNG")
     encoded_string = base64.b64encode(byte_arr.getvalue()).decode("utf-8")
@@ -79,26 +68,32 @@ def illustrate(
 
     return images
 
+
 class IllustratePayload(BaseModel):
     story: str = Field(..., description="The text of the story to illustrate")
     story_title: str = Field(..., description="The title of the story")
     story_author: str = Field(..., description="The author of the story")
     story_setting: str = Field(..., description="The setting of the story")
-    wandb_api_key: str = Field(..., description="The wandb api key", min_length=40, max_length=40)
-    return_images: bool = Field(default=False, description="Whether to return the images in the response")
+    wandb_api_key: str = Field(
+        ..., description="The wandb api key", min_length=40, max_length=40
+    )
+    return_images: bool = Field(
+        default=False, description="Whether to return the images in the response"
+    )
     dummy: bool = Field(default=False, description="Whether to use the dummy images")
 
-    @field_validator('wandb_api_key')
+    @field_validator("wandb_api_key")
     def validate_wandb_api_key(cls, v):
         if len(v) != 40:
-            raise ValueError('wandb_api_key must be exactly 40 characters long')
+            raise ValueError("wandb_api_key must be exactly 40 characters long")
         return v
+
 
 def clean_wandb_api_key():
     if "WANDB_API_KEY" in os.environ:
-        os.unsetenv('WANDB_API_KEY')
+        os.unsetenv("WANDB_API_KEY")
         del os.environ["WANDB_API_KEY"]
-    
+
     # Delete the ~/.netrc file if it exists
     netrc_path = os.path.expanduser("~/.netrc")
     if os.path.exists(netrc_path):
@@ -110,14 +105,17 @@ def clean_wandb_api_key():
     else:
         logger.info(f"{netrc_path} does not exist")
 
+
 def setup_wandb(wandb_api_key: str):
     clean_wandb_api_key()
     logger.info(f"Logging into wandb with key: {wandb_api_key}")
     import wandb
+
     wandb.login(key=wandb_api_key, relogin=True)
-    
+    time.sleep(1)
     print("Attemp login to Weave")
     import weave
+
     weave.init("illustration-project")
 
 
@@ -141,6 +139,7 @@ def get_images_dict(stdout: str):
     image_base64_dict = json.loads(dict_str)
     return image_base64_dict
 
+
 def load_image(fn, mode=None):
     "Open and load a `PIL.Image` and convert to `mode`"
     im = Image.open(fn)
@@ -148,18 +147,21 @@ def load_image(fn, mode=None):
     im = im._new(im.im)
     return im
 
+
 def dummy_generate_illustration_process(payload: IllustratePayload, n=2):
     "Generate n dummy PIL.Images objects"
     setup_wandb(payload.wandb_api_key)
 
-    #dummy op to generate traces
+    # dummy op to generate traces
     import weave
+
     @weave.op(name="dummy_generate_illustration_process")
-    def dummy_gen():
+    def dummy_gen(payload: IllustratePayload):
         return [load_image("pug.png") for _ in range(n)]
-    
+
     clean_wandb_api_key()
-    return dummy_gen()
+    return dummy_gen(payload)
+
 
 def generate_images(payload: IllustratePayload):
     if payload.dummy:
@@ -167,13 +169,16 @@ def generate_images(payload: IllustratePayload):
     else:
         images = generate_illustration_process(payload)
     if payload.return_images:
-        images_dict = {f"image_{i}": image_to_base64(image) for i, image in enumerate(images)}
+        images_dict = {
+            f"image_{i}": image_to_base64(image) for i, image in enumerate(images)
+        }
         print("<img>")
         print(json.dumps(images_dict))
         print("</img>")
     else:
         print("<img>")
         print("</img>")
+
 
 @dataclass
 class Args:
@@ -184,6 +189,7 @@ class Args:
     wandb_api_key: str = "dummy_key"
     dummy: bool = False
     return_images: bool = False
+
 
 if __name__ == "__main__":
     args = simple_parsing.parse(Args)
