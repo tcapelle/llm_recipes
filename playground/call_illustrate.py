@@ -15,7 +15,7 @@ WANDB_API_KEY = os.environ["WANDB_API_KEY"]
 
 def call_illustrate(payload: dict, url: str):
     console.print(f"Sending Payload to url={url} :")
-    console.print(vars(payload))
+    console.print(payload)
     console.print("[cyan]==============================================================[/cyan]")
     response = requests.post(
         url, 
