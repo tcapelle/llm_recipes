@@ -108,6 +108,7 @@ def clean_wandb_api_key():
 
 def setup_wandb(wandb_api_key: str):
     clean_wandb_api_key()
+    os.environ["WANDB_API_KEY"] = wandb_api_key
     logger.info(f"Logging into wandb with key: {wandb_api_key}")
     import wandb
 
