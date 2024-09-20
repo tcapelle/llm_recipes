@@ -1,4 +1,5 @@
 import asyncio
+import os
 import re
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -179,10 +180,15 @@ async def run_python(program: Path, *args, timeout: float = 200):
         print("=" * 100)
 
     try:
+        custom_env = {
+            "FAL_KEY": os.environ["FAL_KEY"],
+            "OPENAI_API_KEY": os.environ["OPENAI_API_KEY"],
+        }
         process = await asyncio.create_subprocess_exec(
             sys.executable,
             program,
             *args,
+            env=custom_env,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
