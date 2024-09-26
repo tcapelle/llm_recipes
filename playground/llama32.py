@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 import time
 import openai
-from pydantic import BaseModel, ConfigDict, field_validator, Field
+from pydantic import BaseModel, ConfigDict, model_validator, field_validator,Field
 import logging
 import simple_parsing
 from dataclasses import dataclass
@@ -13,22 +13,26 @@ logger = logging.getLogger(__name__)
 
 SERVER_URL = os.environ.get("SERVER_URL")
 SERVER_API_KEY = os.environ.get("SERVER_API_KEY")
+MODEL = os.environ.get("MODEL")
 
 client = openai.OpenAI(
     api_key=SERVER_API_KEY,
     base_url=SERVER_URL,
 )
 
+
 class Body(BaseModel):
     model: str = Field(
         ..., description="Must be 'meta-llama/Llama-3.2-90B-Vision-Instruct-Turbo'"
-    )  # Ensure model is exactly "llama32"
+    )
     model_config = ConfigDict(extra="allow")
 
+    # Using field_validator to validate the model field
+    @field_validator('model')
     def validate_model(cls, v):
-        if v != "meta-llama/Llama-3.2-90B-Vision-Instruct-Turbo":
+        if not "Llama-3.2" in v:
             raise ValueError(
-                "model must be 'meta-llama/Llama-3.2-90B-Vision-Instruct-Turbo'"
+                "model must be 'meta-llama/Llama-3.2-*'"
             )
         return v
 
@@ -36,17 +40,21 @@ class Body(BaseModel):
 class RequestPayload(BaseModel):
     headers: dict = Field(
         ...,
-        description="Must include 'wandb_api_key' with exactly 40 alphanumeric characters",
+        description="Must include 'Authorization' header with a Bearer token of exactly 40 alphanumeric characters",
     )
     body: Body
+    wandb_api_key: str = Field(..., description="Automatically extracted from the Authorization header")
 
-    @field_validator("headers")
-    def validate_wandb_api_key(cls, v):
-        if "wandb_api_key" not in v:
-            raise ValueError("wandb_api_key must be included in headers")
-        if len(v["wandb_api_key"]) != 40:
-            raise ValueError("wandb_api_key must be exactly 40 characters long")
-        return v
+    # Using model_validator with mode='before' to set wandb_api_key
+    @model_validator(mode='before')
+    def set_wandb_api_key(cls, values):
+        headers = values.get('headers', {})
+        auth_token = headers.get('authorization', '').split('Bearer ')[-1]
+        if auth_token and len(auth_token) == 40:
+            values['wandb_api_key'] = auth_token
+        else:
+            raise ValueError("Invalid Authorization token")
+        return values
 
 
 def clean_wandb_api_key():
@@ -73,14 +81,14 @@ def setup_wandb(wandb_api_key: str, weave_project: str):
 
     wandb.login(key=wandb_api_key, relogin=True)
     time.sleep(1)
-    print("Attemp login to Weave")
+    print("Attempt login to Weave")
     import weave
 
     weave.init(weave_project)
 
 
 def call_model(payload: RequestPayload, weave_project: str):
-    setup_wandb(payload.headers["wandb_api_key"], weave_project)
+    setup_wandb(payload.wandb_api_key, weave_project)
     response = client.chat.completions.create(**payload.body.model_dump())
     clean_wandb_api_key()
     return response

@@ -39,6 +39,7 @@ class Config:
     stats_window_size: int = 3600  # 1 hour window for statistics
     verbose: bool = False
     python_executable: str = "llama32.py"
+    model: str = "meta-llama"
 
 config = simple_parsing.parse(Config)
 
@@ -253,7 +254,9 @@ async def forward_request(request: Request, path: str):
     ) as temp_file:
         # Write the headers
         headers = dict(request.headers)
-        json_payload = {"headers": headers, "body": json.loads(body)}
+        body = json.loads(body)
+        body["model"] = config.model
+        json_payload = {"headers": headers, "body": body}
         json.dump(json_payload, temp_file, indent=2)
         temp_file.flush()  # Ensure all data is written to disk
 
@@ -282,7 +285,7 @@ async def forward_request(request: Request, path: str):
             stats.record_request(current_time, total_tokens, user_ip)
             return response
         except Exception as e:
-            logger.error(f"Error generating illustration: {e}")
+            logger.error(f"Error generating request: {e}")
             wandb_error = """1. Sign up to a free Weights & Biases account at https://www.wandb.ai \n2. Set WANDB_API_KEY to your API key from https://www.wandb.ai/authorize"""
             if "wandb login" in str(e):
                 return JSONResponse(status_code=500, content={"error": wandb_error})
