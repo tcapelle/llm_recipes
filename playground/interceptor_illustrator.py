@@ -1,110 +1,30 @@
 import asyncio
-from fastapi import FastAPI, Request, BackgroundTasks
-from fastapi.responses import JSONResponse, StreamingResponse
-import uvicorn
 import os
+import re
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+import uvicorn
 import json
-import httpx
 import logging
 import openai
-import wandb
+from pathlib import Path
+import sys
 from dataclasses import dataclass
 import time
 from collections import deque, Counter
-from typing import Optional
-from concurrent.futures import ProcessPoolExecutor
+from contextlib import asynccontextmanager
 from limits import storage
 from limits.strategies import FixedWindowRateLimiter
 from limits import RateLimitItemPerMinute
+from rich.logging import RichHandler
+
 
 import simple_parsing
-from pydantic import BaseModel, Field, field_validator
+
+from illustrator import IllustratePayload
 
 client = openai.AsyncOpenAI()
-app = FastAPI()
 
-from story_illustrator.models import FalAITextToImageGenerationModel, StoryIllustrator
-
-def illustrate(
-    story: str,
-    story_title: str = "Gift of the Magi",
-    story_author: str = "O. Henry",
-    story_setting: str = "the year 1905, New York City, United States of America",
-    openai_model: str = "gpt-4o",
-    llm_seed: Optional[int] = None,
-    txt2img_model_address: str = "fal-ai/flux-pro",
-    image_size: str = "square",
-    illustration_style: Optional[str] = None,
-    use_text_encoder_2: bool = False,
-):
-    story_illustrator = StoryIllustrator(
-        openai_model=openai_model,
-        llm_seed=llm_seed,
-        text_to_image_model=FalAITextToImageGenerationModel(
-            model_address=txt2img_model_address
-        ),
-    )
-    paragraphs = story.split("\n\n")
-    story_illustrator.predict(
-        story=story,
-        metadata={
-            "title": story_title,
-            "author": story_author,
-            "setting": story_setting,
-        },
-        paragraphs=paragraphs[:10],
-        illustration_style=illustration_style,
-        use_text_encoder_2=use_text_encoder_2,
-        image_size=image_size,
-    )
-    
-
-class IllustratePayload(BaseModel):
-    story: str = Field(..., description="The text of the story to illustrate")
-    story_title: str = Field(..., description="The title of the story")
-    story_author: str = Field(..., description="The author of the story")
-    story_setting: str = Field(..., description="The setting of the story")
-    wandb_api_key: str = Field(..., description="The wandb api key", min_length=40, max_length=40)
-
-    @field_validator('wandb_api_key')
-    def validate_wandb_api_key(cls, v):
-        if len(v) != 40:
-            raise ValueError('wandb_api_key must be exactly 40 characters long')
-        return v
-
-def clean_wandb_api_key():
-    if "WANDB_API_KEY" in os.environ:
-        os.unsetenv('WANDB_API_KEY')
-        del os.environ["WANDB_API_KEY"]
-    
-    # Delete the ~/.netrc file if it exists
-    netrc_path = os.path.expanduser("~/.netrc")
-    if os.path.exists(netrc_path):
-        try:
-            os.remove(netrc_path)
-            logger.info(f"Deleted {netrc_path}")
-        except OSError as e:
-            logger.error(f"Error deleting {netrc_path}: {e}")
-    else:
-        logger.info(f"{netrc_path} does not exist")
-
-def generate_illustration_process(payload: IllustratePayload):
-    # Set the WANDB_API_KEY environment variable
-    clean_wandb_api_key()
-
-    logger.info(f"Logging into wandb with key: {payload.wandb_api_key}")
-    wandb.login(key=payload.wandb_api_key, relogin=True)
-    
-    import weave
-    weave.init("illustration-project")
-    result = illustrate(
-        story=payload.story,
-        story_title=payload.story_title,
-        story_author=payload.story_author,
-        story_setting=payload.story_setting,
-    )
-    clean_wandb_api_key()
-    return result
 
 @dataclass
 class Config:
@@ -119,15 +39,18 @@ class Config:
     weave_project: str = "interceptor-illustrator"
     stats_window_size: int = 3600  # 1 hour window for statistics
     verbose: bool = False
+    python_executable: str = "illustrator.py"
+
 
 config = simple_parsing.parse(Config)
 
-# Create a ProcessPoolExecutor
-process_pool = ProcessPoolExecutor(max_workers=config.max_concurrent_requests)
-
-# Set up logging
-logger = logging.getLogger('interceptor')
-logging.basicConfig(level=config.log_level)
+logger = logging.getLogger("interceptor")
+logging.basicConfig(
+    level=config.log_level,
+    format="%(message)s",
+    datefmt="[%X]",
+    handlers=[RichHandler(markup=True)],
+)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 # Set up rate limiter
@@ -140,54 +63,59 @@ rate_limit_response = {
         "message": config.rate_limit_error_message,
         "type": "rate_limit_error",
         "param": None,
-        "code": "rate_limit_exceeded"
+        "code": "rate_limit_exceeded",
     }
 }
 
 # Create a semaphore to limit concurrent requests
 semaphore = asyncio.Semaphore(config.max_concurrent_requests)
 
+
 class Stats:
     def __init__(self, window_size):
         self.window_size = window_size
         self.request_times = deque(maxlen=window_size)
-        self.token_counts = deque(maxlen=window_size)
+        self.image_counts = deque(maxlen=window_size)
         self.user_requests = deque(maxlen=window_size)
         self.unique_users = Counter()
 
-    def record_request(self, timestamp, tokens, user_ip):
+    def record_request(self, timestamp, images, user_ip):
         self.request_times.append(timestamp)
-        self.token_counts.append((timestamp, tokens))
+        self.image_counts.append((timestamp, images))
         self.user_requests.append((timestamp, user_ip))
         self.unique_users[user_ip] += 1
 
     def calculate_request_stats(self):
         if not self.request_times:
             return 0, 0
-        
+
         current_time = time.time()
         one_minute_ago = current_time - 60
-        
+
         relevant_requests = [t for t in self.request_times if t > one_minute_ago]
         requests_last_minute = len(relevant_requests)
-        
+
         rps = requests_last_minute / 60
         rpm = requests_last_minute
-        
+
         return rps, rpm
 
-    def calculate_token_stats(self):
-        if not self.token_counts:
+    def calculate_image_stats(self):
+        if not self.image_counts:
             return 0, 0
-        
+
         current_time = time.time()
         one_minute_ago = current_time - 60
         one_hour_ago = current_time - 3600
-        
-        tokens_last_minute = sum(count for t, count in self.token_counts if t > one_minute_ago)
-        tokens_last_hour = sum(count for t, count in self.token_counts if t > one_hour_ago)
-        
-        return tokens_last_minute, tokens_last_hour
+
+        images_last_minute = sum(
+            count for t, count in self.image_counts if t > one_minute_ago
+        )
+        images_last_hour = sum(
+            count for t, count in self.image_counts if t > one_hour_ago
+        )
+
+        return images_last_minute, images_last_hour
 
     def calculate_unique_users(self, time_window=3600):
         current_time = time.time()
@@ -199,22 +127,40 @@ class Stats:
         while True:
             await asyncio.sleep(20)  # Wait for 20 seconds
             rps, rpm = self.calculate_request_stats()
-            tokens_per_minute, tokens_per_hour = self.calculate_token_stats()
+            images_per_minute, images_per_hour = self.calculate_image_stats()
             unique_users_hour = self.calculate_unique_users(3600)  # Last hour
             unique_users_day = self.calculate_unique_users(86400)  # Last 24 hours
-            
+
             print("=" * 100)
-            logger.info(f"PERIODIC STATS:")
+            logger.info("PERIODIC STATS:")
             logger.info(f"Current RPS: {rps:.2f}")
             logger.info(f"RPM: {rpm}")
-            logger.info(f"Tokens/min: {tokens_per_minute}")
-            logger.info(f"Tokens/hour: {tokens_per_hour}")
+            logger.info(f"Images/min: {images_per_minute}")
+            logger.info(f"Images/hour: {images_per_hour}")
             logger.info(f"Unique users (last hour): {unique_users_hour}")
             logger.info(f"Unique users (last 24 hours): {unique_users_day}")
             print("=" * 100)
 
+
 # Initialize Stats
 stats = Stats(config.stats_window_size)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Start the background task to print stats periodically
+    stats_task = asyncio.create_task(stats.print_stats_periodically())
+    yield
+    # Shutdown: Cancel the background task
+    stats_task.cancel()
+    try:
+        await stats_task
+    except asyncio.CancelledError:
+        pass
+
+
+app = FastAPI(lifespan=lifespan)
+
 
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
@@ -224,55 +170,164 @@ async def rate_limit_middleware(request: Request, call_next):
     response = await call_next(request)
     return response
 
+
+async def run_python(program: Path, *args, timeout: float = 200):
+    """
+    Run a Python program with the given input file and output file.
+    """
+    if config.verbose:
+        print(f"Executing {sys.executable} {program} with args: {args}\n")
+        print("=" * 100)
+
+    try:
+        custom_env = {
+            "FAL_KEY": os.environ["FAL_KEY"],
+            "OPENAI_API_KEY": os.environ["OPENAI_API_KEY"],
+        }
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            program,
+            *args,
+            env=custom_env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(), timeout=timeout
+            )
+        except asyncio.TimeoutError:
+            process.kill()
+            raise TimeoutError(f"Program execution timed out after {timeout} seconds")
+
+        if process.returncode != 0:
+            raise RuntimeError(f"Program execution failed: {stderr.decode()}")
+
+        return stdout.decode(), stderr.decode()
+
+    except Exception as e:
+        raise RuntimeError(f"Error running Python program: {str(e)}")
+
+
+async def generate_illustration(payload: IllustratePayload):
+    # Run the python script
+    args = [f"--{k}={v}" for k, v in payload.model_dump().items()]
+    if config.verbose:
+        print(f"Running {config.python_executable} with args:")
+        for arg in args:
+            print(f"  {arg}")
+        print("=" * 100)
+    return await run_python(
+        Path(config.python_executable),
+        *args,
+    )
+
+
+def get_weave_link(stdout: str):
+    "Use regex to parse everything between two newlines and \\n🍩 and \\n"
+    match = re.search(r"\n🍩(.*?)\n", stdout, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    else:
+        return None
+
+
+def get_wandb_user(stdout: str):
+    """Extracts the W&B user:
+    s = "Logged in as Weights & Biases user: geekyrakshit."
+    user = get_wandb_user(s)
+    assert user == "geekyrakshit"
+    """
+    match = re.search(r"Logged in as Weights & Biases user: (.*)\.", stdout)
+    if match:
+        return match.group(1).strip()
+    return None
+
+
+def get_images_dict(stdout: str):
+    image_base64_dict = json.loads(stdout.split("<img>")[-1].split("</img>")[-2])
+    return image_base64_dict
+
+
 @app.post("/illustrate/{path:path}")
 async def forward_request(request: Request, path: str):
     """
     Generate an illustration for a story.
     """
-    print("=" * 100)
+    if config.verbose:
+        print("=" * 100)
     headers = request.headers
     wandb_api_key = headers.get("wandb-api-key")
     if wandb_api_key is None:
-        return JSONResponse(status_code=400, content={"error": "wandb-api-key header is required"})
-    logger.info(f"Headers: {headers}")
+        return JSONResponse(
+            status_code=400, content={"error": "wandb-api-key header is required"}
+        )
     # Get the request body
     body = await request.body()
-    logger.info(f"Body: {body}")
-
     # Parse the JSON body
     try:
         data = json.loads(body)
         data["wandb_api_key"] = wandb_api_key
         payload = IllustratePayload.model_validate(data)
-        print("=" * 100)
-        logger.info(f"Received payload: {payload}")
+        if config.verbose:
+            print(f"Headers: {headers}")
+            print("=" * 100)
+            print(f"Received payload: {payload}")
     except Exception as e:
         return JSONResponse(status_code=400, content={"error": f"Invalid Payload: {e}"})
 
     # Get the user's IP address
     client_ip = request.client.host
-    logger.info(f"Client IP: {client_ip}")
-    print("=" * 100)
+    num_images = len(payload.story.split("\n\n"))
+    logger.info(
+        f"Got request from client IP: {client_ip} to generate {num_images} images"
+    )
+    if config.verbose:
+        print("=" * 100)
 
     try:
         # Use ProcessPoolExecutor to run generate_illustration in a separate process
-        future = process_pool.submit(generate_illustration_process, payload)
-        
+
         # Wait for the result
-        result = await asyncio.get_event_loop().run_in_executor(None, future.result)
-        
-        # Record the request and update stats
-        stats.record_request(time.time(), 0, client_ip)  # Update with actual token count if available
-        
-        # Check if the result is an image
-        if isinstance(result, bytes):
-            return StreamingResponse(io.BytesIO(result), media_type="image/png")
-        else:
-            return JSONResponse(content={"result": result})
+        async with semaphore:  # Use semaphore to limit concurrent requests
+            stdout, stderr = await generate_illustration(payload)
+            if config.verbose:
+                print("=" * 100)
+                print(stdout[:300])
+                print("...")
+                print("=" * 100)
+            # Record the request and update stats
+            if payload.return_images:
+                image_base64_dict = get_images_dict(stdout)
+            else:
+                image_base64_dict = {
+                    f"image_{i}": "no_image" for i in range(num_images)
+                }
+
+            # compute some stats
+            current_time = time.time()
+            total_images = len(image_base64_dict)
+            wandb_user = get_wandb_user(
+                stdout
+            )  # Update with actual token count if available
+            logger.info(
+                f"Served {total_images} images to [cyan]{wandb_user}[/] at {client_ip}"
+            )
+            stats.record_request(current_time, total_images, client_ip)
+
+            return JSONResponse(
+                content={
+                    "result": f"Generated {total_images} images successfully",
+                    "weave_trace": get_weave_link(stdout),
+                    "images": image_base64_dict,
+                }
+            )
     except Exception as e:
         logger.error(f"Error generating illustration: {e}")
+        wandb_error = """1. Sign up to a free Weights & Biases account at https://www.wandb.ai \n2. Set WANDB_API_KEY to your API key from https://www.wandb.ai/authorize"""
         if "wandb login" in str(e):
-            return JSONResponse(status_code=500, content={"error": "wandb login failed, please check your wandb api key"})
+            return JSONResponse(status_code=500, content={"error": wandb_error})
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
