@@ -281,7 +281,7 @@ async def forward_request(request: Request, path: str):
             user_ip = request.client.host
             wandb_user = get_wandb_user(stdout)  # Update with actual token count if available
             logger.info(
-                f"Served {total_tokens} tokens images to [cyan]{wandb_user}[/] at {user_ip}"
+                f"Served {total_tokens} tokens to [cyan]{wandb_user}[/] at {user_ip}"
             )
             stats.record_request(current_time, total_tokens, user_ip)
             return response
