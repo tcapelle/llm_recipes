@@ -31,7 +31,8 @@ class Config:
     server_url: str
     server_api_key: str
     rate_limit_requests_per_minute: int = 100
-    max_concurrent_requests: int = 5  # New parameter for shore
+    timeout: float = 30
+    max_concurrent_requests: int = 10  # New parameter for shore
     rate_limit_error_message: str = "Rate limit exceeded. Please try again later."
     server_host: str = "0.0.0.0"
     server_port: int = 8032
@@ -172,7 +173,7 @@ async def rate_limit_middleware(request: Request, call_next):
     return response
 
 
-async def run_python(program: Path, *args, timeout: float = 200):
+async def run_python(program: Path, *args, timeout: float = config.timeout):
     """
     Run a Python program with the given input file and output file.
     """
