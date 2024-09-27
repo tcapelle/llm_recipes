@@ -13,7 +13,6 @@ logger = logging.getLogger(__name__)
 
 SERVER_URL = os.environ.get("SERVER_URL")
 SERVER_API_KEY = os.environ.get("SERVER_API_KEY")
-MODEL = os.environ.get("MODEL")
 
 client = openai.OpenAI(
     api_key=SERVER_API_KEY,
@@ -79,7 +78,7 @@ def setup_wandb(wandb_api_key: str, weave_project: str):
     os.environ["WANDB_API_KEY"] = wandb_api_key
     import wandb
 
-    wandb.login(key=wandb_api_key, relogin=True)
+    wandb.login(key=wandb_api_key, relogin=True, verify=True)
     time.sleep(1)
     print("Attempt login to Weave")
     import weave
